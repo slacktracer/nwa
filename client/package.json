@@ -1,0 +1,40 @@
+{
+  "name": "nwa",
+  "version": "0.0.0",
+  "author": "Thiago F",
+  "devDependencies": {
+    "jspm": "^0.16.30"
+  },
+  "eslintConfig": {
+    "env": {
+      "es6": true
+    },
+    "extends": "eslint:recommended",
+    "parserOptions": {
+      "ecmaVersion": 6,
+      "sourceType": "module"
+    },
+    "rules": {
+      "complexity": 2,
+      "default-case": 2,
+      "eqeqeq": 2,
+      "indent": 2,
+      "no-extra-semi": 2,
+      "no-new-object": 2,
+      "no-var": 2,
+      "prefer-const": 2,
+      "semi": 2
+    }
+  },
+  "jspm": {
+    "devDependencies": {
+      "babel": "npm:babel-core@^5.8.24",
+      "babel-runtime": "npm:babel-runtime@^5.8.24",
+      "core-js": "npm:core-js@^1.1.4"
+    }
+  },
+  "scripts": {
+    "build": "jspm bundle-sfx source/main.js release/main.js --minify",
+    "jspm": "jspm"
+  }
+}
