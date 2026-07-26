@@ -42,9 +42,11 @@ import torch.optim as optim
 @dataclass
 class Config:
     num_players: int = 4
-    obs_dim: int = 33       # 4 ships × 8 + 1 starRadius
-    act_dim: int = 20       # 4 ships × 5 actions
     hid_dim: int = 64
+
+    def __post_init__(self):
+        self.obs_dim = self.num_players * 8 + 1
+        self.act_dim = self.num_players * 5
 
     lr: float = 3e-4
     gamma: float = 0.99
@@ -171,7 +173,7 @@ class NWABridge:
             [deno_path, "run", "--allow-read", "--allow-write", str(bridge_abs)],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
             bufsize=1,
         )
@@ -452,6 +454,40 @@ def save_checkpoint(
     print(f"  [checkpoint] saved {path}")
 
 
+def export_for_browser(net: PPONet, config: Config, path: str) -> None:
+    """Export weights as flat JSON arrays for the browser model_loader.ts."""
+    sd = net.state_dict()
+    w1 = sd["shared.0.weight"].cpu().numpy().T.flatten().tolist()
+    b1 = sd["shared.0.bias"].cpu().numpy().tolist()
+    w2 = sd["shared.2.weight"].cpu().numpy().T.flatten().tolist()
+    b2 = sd["shared.2.bias"].cpu().numpy().tolist()
+    pw = sd["policy_head.weight"].cpu().numpy().T.flatten().tolist()
+    pb = sd["policy_head.bias"].cpu().numpy().tolist()
+    vw = sd["value_head.weight"].cpu().numpy().T.flatten().tolist()
+    vb = sd["value_head.bias"].cpu().numpy().tolist()
+    data = {
+        "inSize": config.obs_dim, "hid": config.hid_dim, "outSize": config.act_dim,
+        "w1": w1, "b1": b1, "w2": w2, "b2": b2,
+        "pw": pw, "pb": pb, "vw": vw, "vb": vb,
+    }
+    with open(path, "w") as f:
+        json.dump(data, f)
+    print(f"  [export] browser model → {path}")
+
+
+def write_status(iteration: int, steps: int, stats: dict, avg_r: float, avg_len: float, path: str = "client/training_status.json") -> None:
+    """Write live status for the training dashboard."""
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w") as f:
+        json.dump({
+            "iter": iteration, "steps": steps,
+            "avg_len": avg_len, "avg_rew": avg_r,
+            "p_loss": stats.get("p_loss", 0),
+            "v_loss": stats.get("v_loss", 0),
+            "ent": stats.get("entropy", 0),
+        }, f)
+
+
 def load_checkpoint(
     path: str,
     net: PPONet,
@@ -552,10 +588,12 @@ def train(config: Config) -> None:
                     f"avg_r={avg_r:.3f} avg_len={avg_len:.0f} | "
                     f"last100_r={last100_r:.3f}"
                 )
+                write_status(iteration, total_steps, stats, avg_r, avg_len)
 
             # Checkpoint
             if iteration % config.save_interval == 0:
                 save_checkpoint(net, optimizer, iteration, config, stats)
+                export_for_browser(net, config, "client/ppo_model_final.json")
 
     except KeyboardInterrupt:
         print("\nInterrupted. Saving checkpoint...")
