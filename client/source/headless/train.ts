@@ -156,10 +156,10 @@ async function main() {
     const returns = new Float64Array(T);
     let gae = 0;
     for (let t = T - 1; t >= 0; t--) {
+      const mask = allDones[t] ? 0 : 1;
       const nextVal = t < T - 1 ? allValues[t + 1] : 0;
-      const nextDone = t < T - 1 ? (allDones[t + 1] ? 1 : 0) : 1;
-      const delta = allRewards[t] + GAMMA * nextVal * (1 - nextDone) - allValues[t];
-      gae = delta + GAMMA * LAMBDA * (1 - nextDone) * gae;
+      const delta = allRewards[t] + GAMMA * nextVal * mask - allValues[t];
+      gae = delta + GAMMA * LAMBDA * mask * gae;
       advantages[t] = gae;
       returns[t] = gae + allValues[t];
     }

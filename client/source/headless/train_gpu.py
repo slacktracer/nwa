@@ -26,8 +26,6 @@ import json
 import math
 import os
 import subprocess
-import sys
-import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -350,10 +348,10 @@ def compute_gae(
 
     gae = 0.0
     for t in reversed(range(T)):
+        mask = 0.0 if dones[t] else 1.0
         next_val = values[t + 1] if t < T - 1 else 0.0
-        next_done = dones[t + 1] if t < T - 1 else 1.0
-        delta = rewards[t] + gamma * next_val * (1.0 - next_done) - values[t]
-        gae = delta + gamma * gae_lambda * (1.0 - next_done) * gae
+        delta = rewards[t] + gamma * next_val * mask - values[t]
+        gae = delta + gamma * gae_lambda * mask * gae
         advantages[t] = gae
         returns[t] = gae + values[t]
 
@@ -379,7 +377,6 @@ def ppo_update(
     advantages = (advantages - adv_mean) / adv_std
 
     T = batch.obs.shape[0]
-    indices = torch.arange(T, device=batch.obs.device)
 
     total_p_loss = 0.0
     total_v_loss = 0.0
@@ -406,9 +403,7 @@ def ppo_update(
             surr2 = torch.clamp(ratio, 1.0 - config.clip_epsilon, 1.0 + config.clip_epsilon) * mb_advantages
             p_loss = -torch.min(surr1, surr2).mean()
 
-            # Value loss (clipped)
-            v_pred_clipped = mb_old_log_probs.new_zeros(mb_returns.shape[0])
-            v_pred_clipped = new_values  # simplified: no value clipping for Bernoulli multi-binary
+            # Value loss
             v_loss = F.mse_loss(new_values, mb_returns)
 
             # Entropy bonus
