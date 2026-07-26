@@ -1,0 +1,20 @@
+# humanstxt.org/
+# The humans responsible & technology colophon
+
+# TEAM
+
+    Thiago F
+
+# THANKS
+
+    Zana R
+    Julia L
+
+# TECHNOLOGY COLOPHON
+
+    HTML, CSS, JS
+
+# ATTRIBUTIONS
+
+    label_yellow.ico by Jack Cai
+    label_yellow.png by Jack Cai

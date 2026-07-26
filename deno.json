@@ -1,0 +1,17 @@
+{
+  "name": "nwa",
+  "version": "1.0.0",
+  "description": "Newton was Alright. A game.",
+  "compilerOptions": {
+    "lib": ["dom", "esnext"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "exports": "./client/index.html",
+  "tasks": {
+    "serve": "deno run --allow-net --allow-read --allow-env --allow-run serve.ts",
+    "bundle": "deno run --allow-read --allow-write --allow-env bundle.ts",
+    "check": "deno check client/source/main.ts"
+  }
+}

@@ -1,0 +1,33 @@
+* {
+  border-radius: 0 !important;
+}
+html,
+body
+{
+    background: #121212;
+    margin: 0;
+    overflow: hidden;
+}
+#options {
+    background: #ffffff;
+    border: 1px solid #ffffff;
+    font-size: 1rem;
+    margin: 100px auto 0 auto;
+    opacity: 0.95;
+    padding: 20px;
+    padding-top: 0px;
+    width: 300px;
+}
+#howto {
+    color: #333333;
+    font-size: 0.9em;
+    margin-top: 40px;
+}
+#frame {
+    background: #222222;
+}
+canvas {
+    left: 0;
+    position: absolute;
+    top: 0;
+}
