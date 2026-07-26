@@ -16,7 +16,6 @@ class PolicyNet {
   }
 
   act(input: Float64Array): Float64Array {
-    const hid = data => data.w1 ? data.w1.length / data.b1!.length : 64;
     const H = this.b1.length;
     const h1 = new Float64Array(H);
     for (let i = 0; i < H; i++) {

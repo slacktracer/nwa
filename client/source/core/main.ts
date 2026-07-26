@@ -12,6 +12,8 @@ import Star from "./modules/Star.ts";
 import { createCanvas } from "../utilities/adapter.ts";
 import { on } from "../utilities/events.ts";
 import { KeyboardController } from "../controllers/keyboard.ts";
+import { BrowserAIController } from "../controllers/browser_ai.ts";
+import type { Controller } from "../controller.ts";
 import config from "./config.ts";
 import meter from "../utilities/meter.ts";
 
@@ -25,6 +27,7 @@ export interface GameConfiguration {
   element: HTMLElement;
   height: number;
   players: number;
+  aiPlayers: number;   // 0 = all human, 1-3 = AI opponents
   width: number;
   screen: { height: number; width: number };
 }
@@ -60,8 +63,15 @@ function boot(configuration: GameConfiguration): void {
     }
   });
 
-  const keyboard = new KeyboardController();
-  looper.start([keyboard]);
+  // Build controller list: human (keyboard) + AI opponents
+  const controllers: Controller[] = [];
+  // Human always gets player 1
+  controllers.push(new KeyboardController());
+  // AI opponents
+  for (let i = 0; i < configuration.aiPlayers; i++) {
+    controllers.push(new BrowserAIController("/ppo_model_final.json"));
+  }
+  looper.start(controllers);
 }
 
 function restart(): void {

@@ -14,6 +14,7 @@ events.on(
 
 function configuration(): GameConfiguration {
   const playersSelect = element("#players") as HTMLSelectElement;
+  const aiSelect = element("#aiplayers") as HTMLSelectElement;
   return {
     aspect: "fullscreen",
     contexts: {
@@ -24,6 +25,7 @@ function configuration(): GameConfiguration {
     element: element("#frame"),
     height: 500,
     players: parseInt(playersSelect.value, 10) || 2,
+    aiPlayers: parseInt(aiSelect.value, 10) || 0,
     width: 500,
     screen: screenSize(),
   };
