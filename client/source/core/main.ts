@@ -1,5 +1,4 @@
 import "./dispatcher.ts";
-import input from "./input.ts";
 import looper from "./looper.ts";
 import output from "./output.ts";
 import renderer from "./renderer.ts";
@@ -11,6 +10,10 @@ import Grid from "./modules/Grid.ts";
 import Ship from "./modules/Ship.ts";
 import Star from "./modules/Star.ts";
 import { createCanvas } from "../utilities/adapter.ts";
+import { on } from "../utilities/events.ts";
+import { KeyboardController } from "../controllers/keyboard.ts";
+import config from "./config.ts";
+import meter from "../utilities/meter.ts";
 
 export interface GameConfiguration {
   aspect: string;
@@ -40,11 +43,25 @@ function boot(configuration: GameConfiguration): void {
   Star.build();
 
   output.prepare();
-  input.listen();
 
   renderer.setup(configuration);
 
-  looper.start();
+  // Meta keys (not per-ship controls): restart, debug toggles
+  on("keyup", (e: Event) => {
+    const k = (e as KeyboardEvent).keyCode;
+    switch (k) {
+      case 81: looper.toggle(); break;
+      case 13: restart(); break;
+      case 49: config.clear = !config.clear; break;
+      case 50: config.render = !config.render; break;
+      case 51: config.fps = !config.fps;
+        config.fps ? meter.show() : meter.hide();
+        break;
+    }
+  });
+
+  const keyboard = new KeyboardController();
+  looper.start([keyboard]);
 }
 
 function restart(): void {

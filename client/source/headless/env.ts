@@ -11,6 +11,7 @@ import { update as shipUpdate } from "../core/modules/Ship.ts";
 import { update as starUpdate } from "../core/modules/Star.ts";
 import { tinycolor } from "../utilities/adapter.ts";
 import type { Frame } from "../core/renderer.ts";
+import { type Action, EMPTY_ACTION } from "../controller.ts";
 
 // ── types ────────────────────────────────────────────────
 
@@ -31,14 +32,7 @@ export interface Obs {
   starRadius: number; // pulsating, useful for gravity distance
 }
 
-/** 5 independent booleans — matches how the keyboard input works. */
-export interface Action {
-  thrust: boolean;
-  turnLeft: boolean;
-  turnRight: boolean;
-  fire: boolean;
-  clear: boolean;
-}
+export type { Action };
 
 export interface StepResult {
   obs: Obs;
@@ -52,14 +46,6 @@ export interface StepResult {
 
 const FRAME = { height: 500, width: 500 } as unknown as Frame;
 const DELTA_TIME = 16; // ms per tick, same as original looper
-
-const EMPTY_ACTION: Action = {
-  thrust: false,
-  turnLeft: false,
-  turnRight: false,
-  fire: false,
-  clear: false,
-};
 
 const EMPTY_SHIP_OBS: ShipObs = {
   x: 0, y: 0, vx: 0, vy: 0, angle: 0, battery: 0, missiles: 0, alive: 0,
