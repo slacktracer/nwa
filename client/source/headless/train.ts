@@ -1,66 +1,67 @@
-// REINFORCE + baseline training for NWA.
-// Neural network from scratch, zero dependencies.
-// Multi-binary actions: each of 5 actions per ship is an independent sigmoid.
+// PPO training for NWA — shared-body network with policy + value heads.
 // Run: deno run --allow-read --allow-write client/source/headless/train.ts
 
 import { NWAEnv, type Obs } from "./env.ts";
 import type { Action } from "../controller.ts";
 
-// ── neural network ────────────────────────────────────────
+// ── network ───────────────────────────────────────────────
 
-class MLP {
+class PPONet {
+  // Hidden layers
   w1: Float64Array; b1: Float64Array;
   w2: Float64Array; b2: Float64Array;
+  // Policy head
+  pw: Float64Array; pb: Float64Array;
+  // Value head
+  vw: Float64Array; vb: Float64Array;
 
-  constructor(readonly inSize: number, readonly hidSize: number, readonly outSize: number) {
-    const s1 = Math.sqrt(2 / inSize), s2 = Math.sqrt(2 / hidSize);
-    this.w1 = rand(inSize * hidSize, s1); this.b1 = new Float64Array(hidSize);
-    this.w2 = rand(hidSize * outSize, s2); this.b2 = new Float64Array(outSize);
+  constructor(readonly inSize: number, readonly hid: number, readonly outSize: number) {
+    const s1 = Math.sqrt(2 / inSize), s2 = 1 / Math.sqrt(hid);
+    this.w1 = rand(inSize * hid, s1); this.b1 = new Float64Array(hid);
+    this.w2 = rand(hid * hid, s2);    this.b2 = new Float64Array(hid);
+    this.pw = rand(hid * outSize, 0.01); this.pb = new Float64Array(outSize);
+    this.vw = rand(hid, 0.01);        this.vb = new Float64Array(1);
   }
 
-  forward(input: Float64Array): { h: Float64Array; out: Float64Array } {
-    const h = new Float64Array(this.hidSize);
-    for (let i = 0; i < this.hidSize; i++) {
+  forward(input: Float64Array): { h1: Float64Array; h2: Float64Array; probs: Float64Array; value: number } {
+    const h1 = new Float64Array(this.hid);
+    for (let i = 0; i < this.hid; i++) {
       let s = this.b1[i];
-      for (let j = 0; j < this.inSize; j++) s += this.w1[j * this.hidSize + i] * input[j];
-      h[i] = Math.max(0, s);
+      for (let j = 0; j < this.inSize; j++) s += this.w1[j * this.hid + i] * input[j];
+      h1[i] = Math.max(0, s);
     }
-    const out = new Float64Array(this.outSize);
-    for (let i = 0; i < this.outSize; i++) {
+    const h2 = new Float64Array(this.hid);
+    for (let i = 0; i < this.hid; i++) {
       let s = this.b2[i];
-      for (let j = 0; j < this.hidSize; j++) s += this.w2[j * this.outSize + i] * h[j];
-      out[i] = 1 / (1 + Math.exp(-s));
+      for (let j = 0; j < this.hid; j++) s += this.w2[j * this.hid + i] * h1[j];
+      h2[i] = Math.max(0, s);
     }
-    return { h, out };
+    const probs = new Float64Array(this.outSize);
+    for (let i = 0; i < this.outSize; i++) {
+      let s = this.pb[i];
+      for (let j = 0; j < this.hid; j++) s += this.pw[j * this.outSize + i] * h2[j];
+      probs[i] = 1 / (1 + Math.exp(-s));
+    }
+    let v = this.vb[0];
+    for (let j = 0; j < this.hid; j++) v += this.vw[j] * h2[j];
+    return { h1, h2, probs, value: v };
   }
 
-  act(obs: number[]): { probs: Float64Array; actions: Action[] } {
-    const { out: p } = this.forward(new Float64Array(obs));
-    const acts: Action[] = [];
-    for (let s = 0; s < numShips; s++) {
-      acts.push({
-        thrust:    Math.random() < p[s * 5 + 0],
-        turnLeft:  Math.random() < p[s * 5 + 1],
-        turnRight: Math.random() < p[s * 5 + 2],
-        fire:      Math.random() < p[s * 5 + 3],
-        clear:     Math.random() < p[s * 5 + 4],
+  act(obs: number[]): { probs: Float64Array; value: number; actions: Action[] } {
+    const { probs, value } = this.forward(new Float64Array(obs));
+    const actions: Action[] = [];
+    for (let s = 0; s < NUM_SHIPS; s++) {
+      actions.push({
+        thrust:    Math.random() < probs[s * 5 + 0],
+        turnLeft:  Math.random() < probs[s * 5 + 1],
+        turnRight: Math.random() < probs[s * 5 + 2],
+        fire:      Math.random() < probs[s * 5 + 3],
+        clear:     Math.random() < probs[s * 5 + 4],
       });
     }
-    return { probs: p, actions: acts };
+    return { probs, value, actions };
   }
 }
-
-// ── config ────────────────────────────────────────────────
-
-const NUM_SHIPS = 4;
-const numShips = NUM_SHIPS;
-const OBS_DIM = NUM_SHIPS * 8 + 1; // 33
-const ACT_DIM = NUM_SHIPS * 5;     // 20
-const HID = 64;
-const LR = 3e-4;
-const GAMMA = 0.99;
-const EPISODES = 64;
-const ITERS = 500;
 
 // ── helpers ───────────────────────────────────────────────
 
@@ -81,32 +82,48 @@ function flatObs(obs: Obs): number[] {
 
 const actionKeys: (keyof Action)[] = ["thrust", "turnLeft", "turnRight", "fire", "clear"];
 
-// ── training ──────────────────────────────────────────────
+// ── config ────────────────────────────────────────────────
+
+const NUM_SHIPS = 4;
+const OBS_DIM = NUM_SHIPS * 8 + 1;
+const ACT_DIM = NUM_SHIPS * 5;
+const HID = 64;
+const LR = 1e-4;
+const GAMMA = 0.99;
+const LAMBDA = 0.95;
+const CLIP = 0.2;
+const ENT_COEF = 0.01;
+const VF_COEF = 0.5;
+const EPISODES = 64;
+const PPO_EPOCHS = 4;
+
+// ── main ──────────────────────────────────────────────────
 
 async function main() {
-  const net = new MLP(OBS_DIM, HID, ACT_DIM);
+  const net = new PPONet(OBS_DIM, HID, ACT_DIM);
 
-  console.log(`REINFORCE: ships=${NUM_SHIPS} obs=${OBS_DIM} act=${ACT_DIM} hid=${HID}`);
-  console.log(`lr=${LR} gamma=${GAMMA} episodes_per_iter=${EPISODES}\n`);
+  console.log(`PPO: ships=${NUM_SHIPS} obs=${OBS_DIM} act=${ACT_DIM} hid=${HID}`);
+  console.log(`lr=${LR} gamma=${GAMMA} lambda=${LAMBDA} clip=${CLIP} episodes=${EPISODES}\n`);
 
-  for (let iter = 0; iter < ITERS; iter++) {
-    // ── collect episodes ────────────────────────────────
+  for (let iter = 0; iter < 2000; iter++) {
+    // ── collect ──────────────────────────────────────────
     const allObs: Float64Array[] = [];
-    const allActs: Float64Array[] = [];   // 0/1 per action dim
-    const allProbs: Float64Array[] = [];  // old probs
-    const allRets: number[] = [];         // discounted returns per timestep
+    const allActs: Float64Array[] = [];
+    const allOldProbs: Float64Array[] = [];
+    const allRewards: number[] = [];
+    const allValues: number[] = [];
+    const allDones: boolean[] = [];
+
+    let totalSteps = 0;
+    let totalEpReward = 0;
 
     for (let ep = 0; ep < EPISODES; ep++) {
       const env = new NWAEnv(NUM_SHIPS, 2000);
       let obs = env.reset();
-      const epObs: Float64Array[] = [];
-      const epActs: Float64Array[] = [];
-      const epProbs: Float64Array[] = [];
-      const epRewards: number[] = [];
 
       while (true) {
         const arr = flatObs(obs);
-        const { probs, actions } = net.act(arr);
+        const { probs, value, actions } = net.act(arr);
         const result = env.step(actions);
 
         const actVec = new Float64Array(ACT_DIM);
@@ -116,109 +133,147 @@ async function main() {
           }
         }
 
-        epObs.push(new Float64Array(arr));
-        epActs.push(actVec);
-        epProbs.push(probs);
-        // Sum rewards across all ships as the step reward
-        epRewards.push(result.rewards.reduce((s, r) => s + r, 0));
+        const summedReward = result.rewards.reduce((s: number, r: number) => s + r, 0);
 
-        obs = result.obs;
+        allObs.push(new Float64Array(arr));
+        allActs.push(actVec);
+        allOldProbs.push(probs);
+        allRewards.push(summedReward);
+        allValues.push(value);
+        allDones.push(result.done);
+
+        totalSteps++;
+        totalEpReward += summedReward;
+
         if (result.done) break;
-      }
-
-      // Discounted returns
-      const T = epRewards.length;
-      const rets = new Float64Array(T);
-      let running = 0;
-      for (let t = T - 1; t >= 0; t--) {
-        running = epRewards[t] + GAMMA * running;
-        rets[t] = running;
-      }
-
-      // Normalize returns within episode
-      const mean = rets.reduce((s, v) => s + v, 0) / T;
-      const std = Math.sqrt(rets.reduce((s, v) => s + (v - mean) ** 2, 0) / T) || 1;
-
-      for (let t = 0; t < T; t++) {
-        allObs.push(epObs[t]);
-        allActs.push(epActs[t]);
-        allProbs.push(epProbs[t]);
-        allRets.push((rets[t] - mean) / std);
+        obs = result.obs;
       }
     }
 
-    // ── policy gradient update ────────────────────────────
-    // Gradient for sigmoid binary action with REINFORCE:
-    //   ∂log π(a|s)/∂w = (a - p) * ∂logit/∂w
-    //   SGD: w -= lr * (p - a) * advantage * ∂logit/∂w
-    // We use the approximation: update each output weight proportionally
-    // to hidden activation * (p - a) * advantage.
+    // ── GAE ───────────────────────────────────────────────
+    const T = allRewards.length;
+    const advantages = new Float64Array(T);
+    const returns = new Float64Array(T);
+    let gae = 0;
+    for (let t = T - 1; t >= 0; t--) {
+      const nextVal = t < T - 1 ? allValues[t + 1] : 0;
+      const nextDone = t < T - 1 ? (allDones[t + 1] ? 1 : 0) : 1;
+      const delta = allRewards[t] + GAMMA * nextVal * (1 - nextDone) - allValues[t];
+      gae = delta + GAMMA * LAMBDA * (1 - nextDone) * gae;
+      advantages[t] = gae;
+      returns[t] = gae + allValues[t];
+    }
+    // Normalize advantages
+    const advMean = advantages.reduce((s, v) => s + v, 0) / T;
+    const advStd = Math.sqrt(advantages.reduce((s, v) => s + (v - advMean) ** 2, 0) / T) || 1;
 
-    const N = allObs.length;
-    const gw2 = new Float64Array(HID * ACT_DIM);
-    const gb2 = new Float64Array(ACT_DIM);
-    const gw1 = new Float64Array(OBS_DIM * HID);
-    const gb1 = new Float64Array(HID);
+    // ── PPO update ────────────────────────────────────────
+    for (let epoch = 0; epoch < PPO_EPOCHS; epoch++) {
+      // Shuffle indices
+      const idx = Array.from({ length: T }, (_, i) => i);
+      for (let i = T - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [idx[i], idx[j]] = [idx[j], idx[i]]; }
 
-    for (let i = 0; i < N; i++) {
-      const { h, out: newP } = net.forward(allObs[i]);
-      const oldP = allProbs[i];
-      const act = allActs[i];
-      const adv = allRets[i];
+      let totalPLoss = 0, totalVLoss = 0, totalEnt = 0;
 
-      for (let o = 0; o < ACT_DIM; o++) {
-        // Policy gradient: (p - a) * advantage * sigmoid'(logit) * h
-        // sigmoid' = p * (1-p), but for gradient we use (p - a) directly
-        const grad = (newP[o] - act[o]) * adv;
+      for (const i of idx) {
+        const { probs: newP, value: newV } = net.forward(allObs[i]);
+        const oldP = allOldProbs[i];
+        const act = allActs[i];
+        const adv = (advantages[i] - advMean) / advStd;
+        const ret = returns[i];
+
+        // Policy loss: clipped PPO for multi-binary
+        let pLoss = 0;
+        let ent = 0;
+        for (let a = 0; a < ACT_DIM; a++) {
+          const pOld = Math.max(oldP[a], 1e-8);
+          const pNew = Math.max(newP[a], 1e-8);
+          const ratio = act[a] ? (pNew / pOld) : ((1 - pNew) / (1 - pOld));
+          const clipped = Math.max(1 - CLIP, Math.min(1 + CLIP, ratio));
+          pLoss -= Math.min(ratio * adv, clipped * adv);
+          ent -= pNew * Math.log(pNew) + (1 - pNew) * Math.log(1 - pNew);
+        }
+        pLoss /= ACT_DIM;
+        ent /= ACT_DIM;
+
+        // Value loss
+        const vLoss = (newV - ret) ** 2;
+
+        totalPLoss += pLoss;
+        totalVLoss += vLoss;
+        totalEnt += ent;
+
+        // Proper backprop through both heads to hidden layers
+        const lr = LR;
+        const { h1, h2 } = net.forward(allObs[i]);
+
+        // dh2 = sum of policy head gradient + value head gradient
+        const dh2 = new Float64Array(HID);
+        for (let a = 0; a < ACT_DIM; a++) {
+          const pGrad = (newP[a] - act[a]) * adv / ACT_DIM;
+          for (let j = 0; j < HID; j++) dh2[j] += pGrad * net.pw[j * ACT_DIM + a];
+        }
+        const vGrad = 2 * (newV - ret) * VF_COEF;
+        for (let j = 0; j < HID; j++) dh2[j] += vGrad * net.vw[j];
+
+        // Policy head update
+        for (let a = 0; a < ACT_DIM; a++) {
+          const g = (newP[a] - act[a]) * adv / ACT_DIM;
+          for (let j = 0; j < HID; j++) net.pw[j * ACT_DIM + a] -= lr * g * h2[j];
+          net.pb[a] -= lr * g;
+        }
+        // Value head update
+        for (let j = 0; j < HID; j++) net.vw[j] -= lr * vGrad * h2[j];
+        net.vb[0] -= lr * vGrad;
+
+        // Hidden layer 2: dh2 * ReLU'(h2) back through w2
+        const dh1 = new Float64Array(HID);
         for (let j = 0; j < HID; j++) {
-          gw2[j * ACT_DIM + o] += grad * h[j];
-        }
-        gb2[o] += grad;
-      }
-
-      // Backprop to hidden layer
-      for (let j = 0; j < HID; j++) {
-        let dHidden = 0;
-        for (let o = 0; o < ACT_DIM; o++) {
-          dHidden += (newP[o] - act[o]) * adv * net.w2[j * ACT_DIM + o];
-        }
-        // ReLU derivative: 1 if h[j] > 0
-        if (h[j] > 0) {
-          for (let k = 0; k < OBS_DIM; k++) {
-            gw1[k * HID + j] += dHidden * allObs[i][k];
+          if (h2[j] > 0) {
+            for (let k = 0; k < HID; k++) {
+              net.w2[k * HID + j] -= lr * dh2[j] * h1[k]; // w2[k][j]
+              dh1[k] += dh2[j] * net.w2[k * HID + j];
+            }
+            net.b2[j] -= lr * dh2[j];
           }
-          gb1[j] += dHidden;
         }
+        // Hidden layer 1
+        for (let j = 0; j < HID; j++) {
+          if (h1[j] > 0) {
+            for (let k = 0; k < OBS_DIM; k++) {
+              net.w1[k * HID + j] -= lr * dh1[j] * allObs[i][k]; // w1[k][j]
+            }
+            net.b1[j] -= lr * dh1[j];
+          }
+        }
+      }
+
+      if (epoch === 0 && iter % 10 === 0) {
+        console.log(`iter ${String(iter).padStart(4)} | steps=${T} | p_loss=${(totalPLoss / T).toFixed(4)} v_loss=${(totalVLoss / T).toFixed(4)} ent=${(totalEnt / T).toFixed(4)}`);
       }
     }
 
-    // Apply gradients
-    const scale = LR / N;
-    for (let i = 0; i < net.w1.length; i++) net.w1[i] -= scale * gw1[i];
-    for (let i = 0; i < net.b1.length; i++) net.b1[i] -= scale * gb1[i];
-    for (let i = 0; i < net.w2.length; i++) net.w2[i] -= scale * gw2[i];
-    for (let i = 0; i < net.b2.length; i++) net.b2[i] -= scale * gb2[i];
+    const avgLen = totalSteps / EPISODES;
+    const avgRew = totalEpReward / EPISODES;
 
-    // ── log ──────────────────────────────────────────────
     if (iter % 10 === 0) {
-      const avgR = allRets.reduce((s, v) => s + v, 0) / N;
-      const avgLen = N / EPISODES;
-      console.log(`iter ${String(iter).padStart(4)} | avg_ret=${avgR.toFixed(4)} | avg_len=${avgLen.toFixed(0)} | steps=${N}`);
+      console.log(`  → avg_len=${avgLen.toFixed(0)} avg_rew=${avgRew.toFixed(3)}`);
     }
 
-    if (iter > 0 && iter % 100 === 0) {
-      await save(net, `model_${iter}.json`);
+    if (iter > 0 && iter % 200 === 0) {
+      await save(net, `ppo_model_${iter}.json`);
     }
   }
 
-  await save(net, "model_final.json");
-  console.log("\nDone → model_final.json");
+  await save(net, "ppo_model_final.json");
+  console.log("\nDone → ppo_model_final.json");
 }
 
-async function save(net: MLP, path: string) {
+async function save(net: PPONet, path: string) {
   await Deno.writeTextFile(path, JSON.stringify({
-    inSize: net.inSize, hidSize: net.hidSize, outSize: net.outSize,
+    inSize: net.inSize, hid: net.hid, outSize: net.outSize,
     w1: [...net.w1], b1: [...net.b1], w2: [...net.w2], b2: [...net.b2],
+    pw: [...net.pw], pb: [...net.pb], vw: [...net.vw], vb: [...net.vb],
   }));
   console.log(`  saved ${path}`);
 }
