@@ -79,10 +79,12 @@ export class NWAEnv {
     this.tick = 0;
     this.done = false;
 
-    // Clear old state
+    // Clear old state thoroughly
     entities.missiles.length = 0;
     entities.ships.length = 0;
     (entities.ships as unknown as Record<string, unknown>).byId = {};
+    entities.star = null;
+    entities.grid = null;
 
     // Build ships (headless — no canvas hull/shadow prerender)
     for (let i = 0; i < this.numPlayers; i += 1) {
@@ -93,8 +95,8 @@ export class NWAEnv {
         ...template,
         id: config.id ?? `player${i + 1}`,
         name: config.name ?? template.name,
-        position: config.position ?? template.position,
-        velocity: config.velocity ?? template.velocity,
+        position: [...(config.position ?? template.position)] as [number, number],
+        velocity: [...(config.velocity ?? template.velocity)] as [number, number],
         radians: config.radians ?? template.radians,
         colours: {
           crash: config.colours?.crash ?? template.colours.crash,
