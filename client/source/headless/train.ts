@@ -92,7 +92,6 @@ const LR = 1e-4;
 const GAMMA = 0.99;
 const LAMBDA = 0.95;
 const CLIP = 0.2;
-const ENT_COEF = 0.01;
 const VF_COEF = 0.5;
 const EPISODES = 64;
 const PPO_EPOCHS = 4;

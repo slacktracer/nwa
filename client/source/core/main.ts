@@ -63,17 +63,19 @@ function boot(configuration: GameConfiguration): void {
     }
   });
 
-  // Build controller list
+  // Build controller list — one per ship
+  // Human always gets ship 0. Remaining slots are AI.
   const controllers: Controller[] = [];
-  const allAI = configuration.aiPlayers >= configuration.players;
+  const total = configuration.players;
+  const aiCount = Math.min(configuration.aiPlayers, total - 1);
 
-  for (let i = 0; i < configuration.players; i++) {
-    if (allAI || i > 0 && i <= configuration.aiPlayers) {
-      // AI controller (reloads model every 5s for live training)
-      controllers.push(new BrowserAIController("/ppo_model_final.json"));
+  controllers.push(new KeyboardController(0)); // ship 0 = human
+  for (let i = 1; i < total; i++) {
+    const isAI = (i - 1) < aiCount;
+    if (isAI) {
+      controllers.push(new BrowserAIController(i, "/ppo_model_final.json"));
     } else {
-      // Human keyboard for player 1 (or remaining non-AI slots)
-      controllers.push(new KeyboardController());
+      controllers.push(new KeyboardController(i));
     }
   }
   looper.start(controllers);

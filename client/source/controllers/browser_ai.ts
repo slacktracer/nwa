@@ -1,5 +1,5 @@
-// Browser-based AI controller — observes game state and produces actions.
-// Uses the model loader if a trained model is available, otherwise random.
+// Browser-based AI controller — observes game state and produces one Action.
+// Loads a trained model if available, falls back to random.
 
 import type { Controller, Action } from "../controller.ts";
 import entities from "../core/data/entities.ts";
@@ -21,38 +21,31 @@ function observe(): number[] {
   return f;
 }
 
-const DEFAULT_AI: Action[] = [
-  { thrust: true, turnLeft: false, turnRight: false, fire: false, clear: false },
-  { thrust: false, turnLeft: false, turnRight: true, fire: false, clear: false },
-  { thrust: false, turnLeft: true, turnRight: false, fire: false, clear: false },
-  { thrust: true, turnLeft: false, turnRight: true, fire: false, clear: false },
-];
-
 export class BrowserAIController implements Controller {
-  private model: ((obs: number[]) => Action[]) | null = null;
+  private modelFn: ((obs: number[]) => Action[]) | null = null;
+  private shipIndex: number;
 
-  constructor(modelUrl?: string) {
+  constructor(shipIndex: number, modelUrl?: string) {
+    this.shipIndex = shipIndex;
     if (modelUrl) {
-      loadModel(modelUrl).then((m) => { this.model = m; }).catch(() => {});
+      loadModel(modelUrl).then((m) => { this.modelFn = m; }).catch(() => {});
     }
   }
 
-  getActions(): Action[] {
-    if (this.model) {
-      return this.model(observe());
-    }
-    // Random fallback while model loads or if no model
-    const obs = observe();
-    const alive = obs.filter((_, i) => i % 8 === 7); // alive flags
-    return alive.map((a, i) => {
-      if (!a) return DEFAULT_AI[i] ?? { thrust: false, turnLeft: false, turnRight: false, fire: false, clear: false };
-      return {
-        thrust: Math.random() < 0.3,
-        turnLeft: Math.random() < 0.1,
-        turnRight: Math.random() < 0.1,
-        fire: Math.random() < 0.02,
-        clear: Math.random() < 0.005,
+  getAction(): Action {
+    if (this.modelFn) {
+      const actions = this.modelFn(observe());
+      return actions[this.shipIndex] ?? {
+        thrust: false, turnLeft: false, turnRight: false, fire: false, clear: false,
       };
-    });
+    }
+    // Fallback: simple random behavior
+    return {
+      thrust: Math.random() < 0.3,
+      turnLeft: Math.random() < 0.1,
+      turnRight: Math.random() < 0.1,
+      fire: Math.random() < 0.02,
+      clear: Math.random() < 0.005,
+    };
   }
 }

@@ -1,7 +1,8 @@
 // Controller interface — the abstraction for ship input.
 // Keyboard, AI, joystick, replay — all implement this.
+// One controller per ship. Looper applies controller[i] → ship[i].
 
-/** 5 independent booleans per ship — matches the keyboard input model. */
+/** 5 independent booleans — matches the keyboard input model. */
 export interface Action {
   thrust: boolean;
   turnLeft: boolean;
@@ -18,13 +19,13 @@ export const EMPTY_ACTION: Action = {
   clear: false,
 };
 
-/** A controller produces one Action per active ship each tick. */
+/** A controller produces one Action per tick — for a single ship. */
 export interface Controller {
   /** Called once before the game loop starts. */
-  init?(numPlayers: number): void;
+  init?(): void;
 
-  /** Called each tick. Returns actions for all ships. */
-  getActions(): Action[];
+  /** Called each tick. Returns the action for this controller's ship. */
+  getAction(): Action;
 
   /** Called when the game loop stops. */
   destroy?(): void;

@@ -18,30 +18,26 @@ export class ReplayRecorder {
     this.frames.push({ tick, obs, actions, rewards });
   }
 
-  /** Serialize to JSON — can be saved to disk and replayed later. */
-  toJSON(): string {
-    return JSON.stringify(this.frames);
-  }
+  toJSON(): string { return JSON.stringify(this.frames); }
 }
 
-/** Plays back a recorded game as a Controller (feeds pre-recorded actions). */
 export class ReplayController implements Controller {
   private frames: ReplayFrame[];
   private index = 0;
+  private shipIndex: number;
 
-  constructor(frames: ReplayFrame[]) {
+  constructor(frames: ReplayFrame[], shipIndex: number) {
     this.frames = frames;
+    this.shipIndex = shipIndex;
   }
 
-  getActions(): Action[] {
+  getAction(): Action {
     if (this.index >= this.frames.length) {
-      return [];
+      return { thrust: false, turnLeft: false, turnRight: false, fire: false, clear: false };
     }
-    return this.frames[this.index++].actions;
+    const actions = this.frames[this.index++].actions;
+    return actions[this.shipIndex] ?? { thrust: false, turnLeft: false, turnRight: false, fire: false, clear: false };
   }
 
-  /** Total frames in the replay. */
-  get length(): number {
-    return this.frames.length;
-  }
+  get length(): number { return this.frames.length; }
 }
