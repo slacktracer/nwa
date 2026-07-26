@@ -22,13 +22,16 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import math
 import os
 import subprocess
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import torch
@@ -61,6 +64,7 @@ class Config:
     batch_size: int = 256
     max_episode_steps: int = 2000
     total_iters: int = 2000
+    num_workers: int = 4  # parallel bridge processes
 
     save_interval: int = 200
     log_interval: int = 10
@@ -500,11 +504,57 @@ def load_checkpoint(
     return ckpt.get("iteration", 0), ckpt.get("stats", {})
 
 
+# ── parallel episode runner ────────────────────────────────────────────────
+
+def _run_episode(
+    bridge: NWABridge,
+    cpu_net: PPONet,
+    config: Config,
+) -> tuple[list[dict[str, Any]], float, int]:
+    """Run one episode and return (trajectory_steps, total_reward, length)."""
+    obs = bridge.reset()
+    steps: list[dict[str, Any]] = []
+    ep_reward = 0.0
+    ep_len = 0
+
+    for _step in range(config.max_episode_steps):
+        obs_flat = flat_obs(obs, config.num_players)
+        obs_t = torch.tensor(obs_flat, dtype=torch.float32).unsqueeze(0)
+
+        with torch.no_grad():
+            actions_t, log_probs_t, values_t = cpu_net.get_action(obs_t)
+
+        actions_dict = tensor_to_actions(actions_t.squeeze(0), config.num_players)
+        result = bridge.step(actions_dict)
+
+        reward = sum(result.get("rewards", []))
+        done = result.get("done", False)
+
+        steps.append({
+            "obs": obs_t.squeeze(0),
+            "actions": actions_t.squeeze(0),
+            "log_probs": log_probs_t.squeeze(0),
+            "values": values_t.squeeze(0),
+            "reward": reward,
+            "done": done,
+        })
+
+        ep_reward += reward
+        ep_len += 1
+
+        if done:
+            break
+        obs = result["obs"]
+
+    return steps, ep_reward, ep_len
+
+
 # ── main training loop ────────────────────────────────────────────────────
 
 def train(config: Config) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+    print(f"Workers: {config.num_workers} parallel bridges")
     print(f"Config: obs_dim={config.obs_dim} act_dim={config.act_dim} hid_dim={config.hid_dim}")
     print(f"        lr={config.lr} gamma={config.gamma} lambda={config.gae_lambda}")
     print(f"        clip={config.clip_epsilon} ent_coef={config.ent_coef} vf_coef={config.vf_coef}")
@@ -518,9 +568,10 @@ def train(config: Config) -> None:
     episode_rewards: deque[float] = deque(maxlen=100)
     episode_lengths: deque[int] = deque(maxlen=100)
 
-    print("Starting bridge subprocess...")
-    bridge = NWABridge(config.deno_path, config.bridge_path, config.num_players)
-    print("Bridge ready.\n")
+    print(f"Starting {config.num_workers} bridge workers...")
+    bridges = [NWABridge(config.deno_path, config.bridge_path, config.num_players)
+               for _ in range(config.num_workers)]
+    print("All bridges ready.\n")
 
     total_steps = 0
 
@@ -530,45 +581,35 @@ def train(config: Config) -> None:
             iter_steps = 0
             iter_ep_rewards: list[float] = []
 
-            for _ in range(config.episodes_per_iter):
-                obs = bridge.reset()
-                ep_reward = 0.0
-                ep_len = 0
+            # Copy net to CPU for parallel inference (8k params, fast)
+            cpu_net = copy.deepcopy(net).cpu()
 
-                for _step in range(config.max_episode_steps):
-                    obs_flat = flat_obs(obs, config.num_players)
-                    obs_t = torch.tensor(obs_flat, dtype=torch.float32, device=device).unsqueeze(0)
+            # Divide episodes among workers
+            eps_per_worker = config.episodes_per_iter // config.num_workers
+            remaining = config.episodes_per_iter % config.num_workers
 
-                    with torch.no_grad():
-                        actions_t, log_probs_t, values_t = net.get_action(obs_t)
+            for batch_idx in range(0, config.episodes_per_iter, config.num_workers):
+                batch_size = min(config.num_workers, config.episodes_per_iter - batch_idx)
+                futures = []
+                with ThreadPoolExecutor(max_workers=batch_size) as pool:
+                    for w in range(batch_size):
+                        futures.append(pool.submit(_run_episode, bridges[w], cpu_net, config))
 
-                    actions_dict = tensor_to_actions(actions_t.squeeze(0), config.num_players)
-                    result = bridge.step(actions_dict)
-
-                    reward = sum(result.get("rewards", []))
-                    done = result.get("done", False)
-
-                    buffer.add(
-                        obs_t.squeeze(0),
-                        actions_t.squeeze(0),
-                        log_probs_t.squeeze(0),
-                        values_t.squeeze(0),
-                        reward,
-                        done,
-                    )
-
-                    ep_reward += reward
-                    ep_len += 1
-                    iter_steps += 1
-
-                    if done:
-                        break
-
-                    obs = result["obs"]
-
-                iter_ep_rewards.append(ep_reward)
-                episode_rewards.append(ep_reward)
-                episode_lengths.append(ep_len)
+                    for future in as_completed(futures):
+                        steps, ep_reward, ep_len = future.result()
+                        for s in steps:
+                            buffer.add(
+                                s["obs"].to(device),
+                                s["actions"].to(device),
+                                s["log_probs"].to(device),
+                                s["values"].to(device),
+                                s["reward"],
+                                s["done"],
+                            )
+                        iter_ep_rewards.append(ep_reward)
+                        episode_rewards.append(ep_reward)
+                        episode_lengths.append(ep_len)
+                        iter_steps += ep_len
 
             total_steps += iter_steps
 
@@ -599,7 +640,8 @@ def train(config: Config) -> None:
         print("\nInterrupted. Saving checkpoint...")
         save_checkpoint(net, optimizer, 0, config, {"interrupted": True})
     finally:
-        bridge.close()
+        for bridge in bridges:
+            bridge.close()
 
     # Final save
     save_checkpoint(net, optimizer, config.total_iters, config, {})
@@ -618,6 +660,7 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=64, help="Episodes per iteration")
     parser.add_argument("--checkpoint-dir", default="checkpoints", help="Checkpoint output directory")
     parser.add_argument("--save-interval", type=int, default=200, help="Checkpoint save interval")
+    parser.add_argument("--num-workers", type=int, default=4, help="Number of parallel bridge workers")
     parser.add_argument("--resume", default=None, help="Resume from checkpoint path")
     args = parser.parse_args()
 
@@ -628,6 +671,7 @@ def main() -> None:
         episodes_per_iter=args.episodes,
         checkpoint_dir=args.checkpoint_dir,
         save_interval=args.save_interval,
+        num_workers=args.num_workers,
         deno_path=args.deno_path,
         bridge_path=args.bridge_path,
     )
