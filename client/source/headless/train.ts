@@ -168,6 +168,7 @@ async function main() {
     const advStd = Math.sqrt(advantages.reduce((s, v) => s + (v - advMean) ** 2, 0) / T) || 1;
 
     // ── PPO update ────────────────────────────────────────
+    let lastPLoss = 0, lastVLoss = 0, lastEnt = 0;
     for (let epoch = 0; epoch < PPO_EPOCHS; epoch++) {
       // Shuffle indices
       const idx = Array.from({ length: T }, (_, i) => i);
@@ -251,6 +252,9 @@ async function main() {
       if (epoch === 0 && iter % 10 === 0) {
         console.log(`iter ${String(iter).padStart(4)} | steps=${T} | p_loss=${(totalPLoss / T).toFixed(4)} v_loss=${(totalVLoss / T).toFixed(4)} ent=${(totalEnt / T).toFixed(4)}`);
       }
+      lastPLoss = totalPLoss / T;
+      lastVLoss = totalVLoss / T;
+      lastEnt = totalEnt / T;
     }
 
     const avgLen = totalSteps / EPISODES;
@@ -258,6 +262,11 @@ async function main() {
 
     if (iter % 10 === 0) {
       console.log(`  → avg_len=${avgLen.toFixed(0)} avg_rew=${avgRew.toFixed(3)}`);
+      // Write status for dashboard
+      await Deno.writeTextFile("client/training_status.json", JSON.stringify({
+        iter, steps: totalSteps, avg_len: avgLen, avg_rew: avgRew,
+        p_loss: lastPLoss, v_loss: lastVLoss, ent: lastEnt,
+      }));
     }
 
     if (iter > 0 && iter % 200 === 0) {

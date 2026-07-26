@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NWA Training Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0d1117; color: #c9d1d9; font: 14px monospace; padding: 24px; }
+  h1 { color: #58a6ff; margin-bottom: 16px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; }
+  .card h2 { font-size: 11px; color: #8b949e; text-transform: uppercase; margin-bottom: 4px; }
+  .card .val { font-size: 28px; font-weight: bold; }
+  .green { color: #3fb950; }
+  .yellow { color: #d2991d; }
+  .red { color: #f85149; }
+  .chart { margin-top: 16px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; }
+  canvas { width: 100%; height: 300px; }
+  #status { font-size: 12px; color: #8b949e; margin-top: 8px; }
+  #error { color: #f85149; margin-top: 8px; display: none; }
+</style>
+</head>
+<body>
+<h1>NWA Training Dashboard</h1>
+<div class="grid" id="cards"></div>
+<div class="chart"><canvas id="rewardChart"></canvas></div>
+<div class="chart"><canvas id="lossChart"></canvas></div>
+<div id="status">Waiting for data...</div>
+<div id="error"></div>
+
+<script>
+const data = { rewards: [], losses: [], vLosses: [], ents: [], lens: [] };
+const MAX_POINTS = 200;
+
+async function poll() {
+  try {
+    const r = await fetch("/training_status.json");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const s = await r.json();
+    document.getElementById("error").style.display = "none";
+
+    // Update cards
+    document.getElementById("cards").innerHTML = `
+      <div class="card"><h2>Iteration</h2><div class="val">${s.iter}</div></div>
+      <div class="card"><h2>Avg Length</h2><div class="val ${s.avg_len < 50 ? 'red' : s.avg_len > 300 ? 'green' : 'yellow'}">${s.avg_len.toFixed(0)}</div></div>
+      <div class="card"><h2>Avg Reward</h2><div class="val ${s.avg_rew > 0 ? 'green' : s.avg_rew > -3 ? 'yellow' : 'red'}">${s.avg_rew.toFixed(2)}</div></div>
+      <div class="card"><h2>Steps</h2><div class="val">${s.steps}</div></div>
+      <div class="card"><h2>P Loss</h2><div class="val">${s.p_loss.toFixed(5)}</div></div>
+      <div class="card"><h2>V Loss</h2><div class="val">${s.v_loss.toFixed(5)}</div></div>
+      <div class="card"><h2>Entropy</h2><div class="val">${s.ent.toFixed(4)}</div></div>
+    `;
+
+    // Update charts
+    data.rewards.push(s.avg_rew);
+    data.losses.push(s.p_loss);
+    data.vLosses.push(s.v_loss);
+    data.ents.push(s.ent);
+    data.lens.push(s.avg_len);
+    if (data.rewards.length > MAX_POINTS) { data.rewards.shift(); data.losses.shift(); data.vLosses.shift(); data.ents.shift(); data.lens.shift(); }
+
+    drawChart("rewardChart", [
+      { label: "Avg Reward", data: data.rewards, color: "#3fb950" },
+      { label: "Avg Length / 100", data: data.lens.map(v => v/100), color: "#58a6ff" },
+    ]);
+    drawChart("lossChart", [
+      { label: "P Loss × 100", data: data.losses.map(v => v*100), color: "#f85149" },
+      { label: "V Loss", data: data.vLosses, color: "#d2991d" },
+      { label: "Entropy", data: data.ents, color: "#8b949e" },
+    ]);
+
+    document.getElementById("status").textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+  } catch(e) {
+    document.getElementById("error").style.display = "block";
+    document.getElementById("error").textContent = "Waiting for training to start...";
+  }
+}
+
+function drawChart(id, datasets) {
+  const c = document.getElementById(id);
+  c.width = c.parentElement.clientWidth - 32;
+  const ctx = c.getContext("2d");
+  const W = c.width, H = c.height, pad = 40;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "#30363d"; ctx.lineWidth = 1;
+  ctx.strokeRect(pad, pad, W - pad*2, H - pad*2);
+  for (let i = 0; i < datasets.length; i++) {
+    const d = datasets[i];
+    if (d.data.length < 2) continue;
+    ctx.strokeStyle = d.color; ctx.lineWidth = 2; ctx.beginPath();
+    const xStep = (W - pad*2) / Math.max(d.data.length - 1, 1);
+    let yMin = Math.min(...d.data), yMax = Math.max(...d.data);
+    if (yMax - yMin < 0.001) { yMin -= 0.1; yMax += 0.1; }
+    for (let j = 0; j < d.data.length; j++) {
+      const x = pad + j * xStep;
+      const y = pad + (H - pad*2) * (1 - (d.data[j] - yMin) / (yMax - yMin));
+      if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+}
+
+poll();
+setInterval(poll, 2000);
+</script>
+</body>
+</html>
