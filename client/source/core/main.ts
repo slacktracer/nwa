@@ -63,13 +63,18 @@ function boot(configuration: GameConfiguration): void {
     }
   });
 
-  // Build controller list: human (keyboard) + AI opponents
+  // Build controller list
   const controllers: Controller[] = [];
-  // Human always gets player 1
-  controllers.push(new KeyboardController());
-  // AI opponents
-  for (let i = 0; i < configuration.aiPlayers; i++) {
-    controllers.push(new BrowserAIController("/ppo_model_final.json"));
+  const allAI = configuration.aiPlayers >= configuration.players;
+
+  for (let i = 0; i < configuration.players; i++) {
+    if (allAI || i > 0 && i <= configuration.aiPlayers) {
+      // AI controller (reloads model every 5s for live training)
+      controllers.push(new BrowserAIController("/ppo_model_final.json"));
+    } else {
+      // Human keyboard for player 1 (or remaining non-AI slots)
+      controllers.push(new KeyboardController());
+    }
   }
   looper.start(controllers);
 }

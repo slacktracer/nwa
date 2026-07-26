@@ -271,11 +271,13 @@ async function main() {
 
     if (iter > 0 && iter % 200 === 0) {
       await save(net, `ppo_model_${iter}.json`);
+      await save(net, "client/ppo_model_final.json");
     }
   }
 
   await save(net, "ppo_model_final.json");
-  console.log("\nDone → ppo_model_final.json");
+  await save(net, "client/ppo_model_final.json");
+  console.log("\nDone → ppo_model_final.json (also in client/)");
 }
 
 async function save(net: PPONet, path: string) {
