@@ -6,102 +6,147 @@
 <title>NWA Training Dashboard</title>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0d1117; color: #c9d1d9; font: 14px monospace; padding: 24px; }
-  h1 { color: #58a6ff; margin-bottom: 16px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
-  .card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; }
-  .card h2 { font-size: 11px; color: #8b949e; text-transform: uppercase; margin-bottom: 4px; }
-  .card .val { font-size: 28px; font-weight: bold; }
-  .green { color: #3fb950; }
-  .yellow { color: #d2991d; }
-  .red { color: #f85149; }
-  .chart { margin-top: 16px; background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; }
-  canvas { width: 100%; height: 300px; }
-  #status { font-size: 12px; color: #8b949e; margin-top: 8px; }
-  #error { color: #f85149; margin-top: 8px; display: none; }
+  body { background: #0d1117; color: #c9d1d9; font: 14px/1.5 monospace; padding: 24px; }
+  h1 { color: #58a6ff; margin-bottom: 4px; }
+  .subtitle { color: #8b949e; font-size: 12px; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 20px; }
+  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px 16px; }
+  .card .label { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+  .card .val { font-size: 26px; font-weight: bold; line-height: 1.1; }
+  .card .hint { font-size: 10px; color: #484f58; margin-top: 4px; }
+  .green { color: #3fb950; } .yellow { color: #d2991d; } .red { color: #f85149; }
+  .blue { color: #58a6ff; } .gray { color: #8b949e; }
+  .chart-wrap { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+  .chart-title { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+  .chart-title span { color: #c9d1d9; }
+  canvas { width: 100%; height: 260px; }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; }
+  .legend-item { display: flex; align-items: center; gap: 4px; }
+  .legend-swatch { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
+  #footer { font-size: 11px; color: #484f58; margin-top: 16px; display: flex; justify-content: space-between; }
+  .tooltip { background: #21262d; border: 1px solid #30363d; padding: 8px 12px; border-radius: 6px; font-size: 11px; position: absolute; display: none; pointer-events: none; z-index: 10; }
 </style>
 </head>
 <body>
-<h1>NWA Training Dashboard</h1>
+<h1>⚔ NWA Training</h1>
+<div class="subtitle">4 players · 512 hidden · 64 workers · GPU · survival bonus +0.05/tick</div>
+
 <div class="grid" id="cards"></div>
-<div class="chart"><canvas id="rewardChart"></canvas></div>
-<div class="chart"><canvas id="lossChart"></canvas></div>
-<div id="status">Waiting for data...</div>
-<div id="error"></div>
+
+<div class="chart-wrap">
+  <div class="chart-title">📈 <span>Reward &amp; Episode Length</span> — the two most important signals</div>
+  <canvas id="c1"></canvas>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch" style="background:#3fb950"></span> Avg Reward — total score per episode (higher = better)</div>
+    <div class="legend-item"><span class="legend-swatch" style="background:#58a6ff"></span> Avg Length ÷ 10 — how many ticks episodes last</div>
+  </div>
+</div>
+<div class="chart-wrap">
+  <div class="chart-title">📉 <span>Policy Entropy</span> — randomness of the AI (lower = more confident)</div>
+  <canvas id="c2"></canvas>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch" style="background:#f0883e"></span> Entropy — max 13.86 (pure random), target 3–6 (skilled)</div>
+  </div>
+</div>
+<div class="chart-wrap">
+  <div class="chart-title">📊 <span>Losses</span> — training diagnostics (lower is healthier)</div>
+  <canvas id="c3"></canvas>
+  <div class="legend">
+    <div class="legend-item"><span class="legend-swatch" style="background:#f85149"></span> Policy Loss — gradient signal strength (should fluctuate near 0)</div>
+    <div class="legend-item"><span class="legend-swatch" style="background:#d2991d"></span> Value Loss — how accurate the critic is (should decrease)</div>
+  </div>
+</div>
+
+<div id="footer">
+  <span id="status">Waiting…</span>
+  <span id="speed"></span>
+</div>
 
 <script>
-const data = { rewards: [], losses: [], vLosses: [], ents: [], lens: [] };
-const MAX_POINTS = 200;
+const MAX = 300;
+const H = { rew: [], len: [], ent: [], pl: [], vl: [] };
+let lastSteps = 0, lastTime = Date.now();
 
 async function poll() {
   try {
     const r = await fetch("/training_status.json");
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (!r.ok) throw 0;
     const s = await r.json();
-    document.getElementById("error").style.display = "none";
+    const now = Date.now();
+    const dt = (now - lastTime) / 1000;
+    const ds = s.steps - lastSteps;
+    const sps = dt > 0 ? Math.round(ds / dt) : 0;
+    lastSteps = s.steps; lastTime = now;
 
-    // Update cards
     document.getElementById("cards").innerHTML = `
-      <div class="card"><h2>Iteration</h2><div class="val">${s.iter}</div></div>
-      <div class="card"><h2>Avg Length</h2><div class="val ${s.avg_len < 50 ? 'red' : s.avg_len > 300 ? 'green' : 'yellow'}">${s.avg_len.toFixed(0)}</div></div>
-      <div class="card"><h2>Avg Reward</h2><div class="val ${s.avg_rew > 0 ? 'green' : s.avg_rew > -3 ? 'yellow' : 'red'}">${s.avg_rew.toFixed(2)}</div></div>
-      <div class="card"><h2>Steps</h2><div class="val">${s.steps}</div></div>
-      <div class="card"><h2>P Loss</h2><div class="val">${s.p_loss.toFixed(5)}</div></div>
-      <div class="card"><h2>V Loss</h2><div class="val">${s.v_loss.toFixed(5)}</div></div>
-      <div class="card"><h2>Entropy</h2><div class="val">${s.ent.toFixed(4)}</div></div>
+      <div class="card"><div class="label">Iteration</div><div class="val blue">${s.iter}</div><div class="hint">of 2000 · ${Math.round(s.iter/2000*100)}%</div></div>
+      <div class="card"><div class="label">Avg Reward</div><div class="val ${s.avg_rew > 50 ? 'green' : s.avg_rew > 20 ? 'yellow' : 'red'}">${s.avg_rew.toFixed(1)}</div><div class="hint">per episode · trend ${s.avg_rew > 30 ? '↑ healthy' : '↓ needs time'}</div></div>
+      <div class="card"><div class="label">Entropy</div><div class="val ${s.ent < 10 ? 'green' : s.ent < 13 ? 'yellow' : 'red'}">${s.ent.toFixed(2)}</div><div class="hint">max 13.86 · ${s.ent < 10 ? 'learning!' : s.ent < 13 ? 'early signs' : 'still random'}</div></div>
+      <div class="card"><div class="label">Avg Length</div><div class="val gray">${s.avg_len.toFixed(0)}</div><div class="hint">ticks per episode</div></div>
+      <div class="card"><div class="label">Value Loss</div><div class="val ${s.v_loss < 0.2 ? 'green' : 'yellow'}">${s.v_loss.toFixed(3)}</div><div class="hint">critic accuracy</div></div>
+      <div class="card"><div class="label">Steps</div><div class="val gray">${(s.steps/1e6).toFixed(2)}M</div><div class="hint">${sps} steps/sec</div></div>
     `;
 
-    // Update charts
-    data.rewards.push(s.avg_rew);
-    data.losses.push(s.p_loss);
-    data.vLosses.push(s.v_loss);
-    data.ents.push(s.ent);
-    data.lens.push(s.avg_len);
-    if (data.rewards.length > MAX_POINTS) { data.rewards.shift(); data.losses.shift(); data.vLosses.shift(); data.ents.shift(); data.lens.shift(); }
+    push(H.rew, s.avg_rew); push(H.len, s.avg_len / 10);
+    push(H.ent, s.ent); push(H.pl, s.p_loss * 1000); push(H.vl, s.v_loss);
 
-    drawChart("rewardChart", [
-      { label: "Avg Reward", data: data.rewards, color: "#3fb950" },
-      { label: "Avg Length / 100", data: data.lens.map(v => v/100), color: "#58a6ff" },
+    chart("c1", [
+      { d: H.rew, c: "#3fb950", min: -10, max: 120 },
+      { d: H.len, c: "#58a6ff", min: 0, max: 80 },
     ]);
-    drawChart("lossChart", [
-      { label: "P Loss × 100", data: data.losses.map(v => v*100), color: "#f85149" },
-      { label: "V Loss", data: data.vLosses, color: "#d2991d" },
-      { label: "Entropy", data: data.ents, color: "#8b949e" },
+    chart("c2", [
+      { d: H.ent, c: "#f0883e", min: 0, max: 14 },
+    ]);
+    chart("c3", [
+      { d: H.pl,  c: "#f85149", min: -5, max: 5 },
+      { d: H.vl,  c: "#d2991d", min: 0, max: 3 },
     ]);
 
-    document.getElementById("status").textContent = `Last update: ${new Date().toLocaleTimeString()}`;
+    document.getElementById("status").textContent = `Updated ${new Date().toLocaleTimeString()}`;
+    document.getElementById("speed").textContent = `${sps} steps/sec`;
   } catch(e) {
-    document.getElementById("error").style.display = "block";
-    document.getElementById("error").textContent = "Waiting for training to start...";
+    // waiting for first data
   }
 }
 
-function drawChart(id, datasets) {
+function push(arr, v) { arr.push(v); if (arr.length > MAX) arr.shift(); }
+
+function chart(id, series) {
   const c = document.getElementById(id);
   c.width = c.parentElement.clientWidth - 32;
   const ctx = c.getContext("2d");
-  const W = c.width, H = c.height, pad = 40;
+  const W = c.width, H = c.height, padL = 40, padR = 10, padT = 10, padB = 25;
   ctx.clearRect(0, 0, W, H);
-  ctx.strokeStyle = "#30363d"; ctx.lineWidth = 1;
-  ctx.strokeRect(pad, pad, W - pad*2, H - pad*2);
-  for (let i = 0; i < datasets.length; i++) {
-    const d = datasets[i];
-    if (d.data.length < 2) continue;
-    ctx.strokeStyle = d.color; ctx.lineWidth = 2; ctx.beginPath();
-    const xStep = (W - pad*2) / Math.max(d.data.length - 1, 1);
-    let yMin = Math.min(...d.data), yMax = Math.max(...d.data);
-    if (yMax - yMin < 0.001) { yMin -= 0.1; yMax += 0.1; }
-    for (let j = 0; j < d.data.length; j++) {
-      const x = pad + j * xStep;
-      const y = pad + (H - pad*2) * (1 - (d.data[j] - yMin) / (yMax - yMin));
-      if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+
+  // Grid
+  ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1;
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (H - padT - padB) * i / 4;
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
+  }
+  // Left axis labels
+  ctx.fillStyle = "#484f58"; ctx.font = "10px monospace"; ctx.textAlign = "right";
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (H - padT - padB) * (4 - i) / 4;
+    const label = (series[0].min + (series[0].max - series[0].min) * i / 4).toFixed(0);
+    ctx.fillText(label, padL - 6, y + 3);
+  }
+
+  for (const s of series) {
+    if (s.d.length < 2) continue;
+    ctx.strokeStyle = s.c; ctx.lineWidth = 2; ctx.beginPath();
+    const xs = (W - padL - padR) / Math.max(s.d.length - 1, 1);
+    const ys = (H - padT - padB) / (s.max - s.min || 1);
+    for (let i = 0; i < s.d.length; i++) {
+      const x = padL + i * xs;
+      const y = padT + (H - padT - padB) - (s.d[i] - s.min) * ys;
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.stroke();
   }
 }
 
-poll();
-setInterval(poll, 2000);
+poll(); setInterval(poll, 3000);
 </script>
 </body>
 </html>
