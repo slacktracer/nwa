@@ -5,114 +5,79 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NWA Training</title>
 <style>
-  * { margin:0; padding:0; box-sizing:border-box; }
-  body { background:#0a0e14; color:#cdd6f4; font:13px/1.4 'SF Mono','Cascadia Code',monospace; padding:28px 32px; max-width:1100px; margin:0 auto; }
-  .top { display:flex; align-items:baseline; gap:12px; margin-bottom:6px; flex-wrap:wrap; }
-  h1 { font-size:20px; color:#89b4fa; font-weight:700; }
-  .badge { font-size:10px; padding:2px 8px; border-radius:10px; font-weight:600; }
-  .badge-gpu { background:#1e3a5f; color:#89b4fa; }
-  .badge-live { background:#1a3a1a; color:#a6e3a1; animation:pulse 2s infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-  .progress-wrap { background:#181825; border-radius:6px; height:4px; margin:10px 0 18px; overflow:hidden; }
-  .progress-bar { height:100%; background:linear-gradient(90deg,#89b4fa,#a6e3a1); border-radius:6px; transition:width .5s; }
-  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; margin-bottom:18px; }
-  .card { background:#11121c; border:1px solid #1e2030; border-radius:10px; padding:12px 14px; position:relative; overflow:hidden; }
-  .card::after { content:''; position:absolute; top:0;left:0;right:0;height:2px; opacity:.6; }
-  .card.good::after { background:#a6e3a1; } .card.warn::after { background:#f9e2af; } .card.bad::after { background:#f38ba8; }
-  .card .lbl { font-size:9px; color:#585b70; text-transform:uppercase; letter-spacing:.6px; }
-  .card .val { font-size:28px; font-weight:800; line-height:1; margin:2px 0; }
-  .card .sub { font-size:10px; color:#45475a; }
-  .g { color:#a6e3a1; } .y { color:#f9e2af; } .r { color:#f38ba8; } .b { color:#89b4fa; } .d { color:#6c7086; }
-  .chart-box { background:#11121c; border:1px solid #1e2030; border-radius:10px; padding:14px 16px 10px; margin-bottom:10px; }
-  .chart-box h3 { font-size:10px; color:#585b70; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
-  canvas { width:100%; height:220px; display:block; }
-  .leg { display:flex; gap:14px; margin-top:4px; font-size:10px; color:#585b70; flex-wrap:wrap; }
-  .leg i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:middle; }
-  .foot { margin-top:10px; font-size:10px; color:#45475a; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#0a0e14;color:#cdd6f4;font:13px/1.4 'SF Mono',monospace;padding:24px 28px;max-width:1200px;margin:0 auto}
+  .top{display:flex;align-items:baseline;gap:10px;margin-bottom:4px;flex-wrap:wrap}
+  h1{font-size:18px;color:#89b4fa;font-weight:700}
+  .badge{font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600}
+  .bg{background:#1e3a5f;color:#89b4fa}.bl{background:#1a3a1a;color:#a6e3a1;animation:pulse 2s infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+  .prog{background:#181825;border-radius:6px;height:3px;margin:8px 0 14px;overflow:hidden}
+  .prog>div{height:100%;background:linear-gradient(90deg,#89b4fa,#a6e3a1);border-radius:6px;transition:width .5s}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:6px;margin-bottom:14px}
+  .card{background:#11121c;border:1px solid #1e2030;border-radius:8px;padding:10px 12px}
+  .card .l{font-size:9px;color:#585b70;text-transform:uppercase;letter-spacing:.5px}.card .v{font-size:24px;font-weight:800;line-height:1.1}.card .s{font-size:10px;color:#45475a;margin-top:2px}
+  .g{color:#a6e3a1}.y{color:#f9e2af}.r{color:#f38ba8}.b{color:#89b4fa}.d{color:#6c7086}
+  .charts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  @media(max-width:800px){.charts{grid-template-columns:1fr}}
+  .ch{background:#11121c;border:1px solid #1e2030;border-radius:8px;padding:10px 14px 8px}
+  .ch h3{font-size:10px;color:#585b70;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+  .ch canvas{width:100%;height:180px;display:block}
+  .foot{margin-top:10px;font-size:10px;color:#45475a;display:flex;justify-content:space-between}
 </style>
 </head>
 <body>
 <div class="top">
   <h1>NWA Training</h1>
-  <span class="badge badge-gpu">GPU · RTX 5070 Ti</span>
-  <span class="badge badge-live" id="live">LIVE</span>
+  <span class="badge bg">GPU · 64w · 512h</span>
+  <span class="badge bl" id="live">LIVE</span>
 </div>
-<div class="progress-wrap"><div class="progress-bar" id="prog" style="width:0%"></div></div>
+<div class="prog"><div id="prog" style="width:0%"></div></div>
 <div class="cards" id="cards"></div>
-
-<div class="chart-box">
-  <h3>Reward &amp; Entropy — the two signals that matter</h3>
-  <canvas id="c1"></canvas>
-  <div class="leg">
-    <span><i style="background:#a6e3a1"></i> Avg Reward (higher = AI is winning more)</span>
-    <span><i style="background:#f38ba8"></i> Entropy ÷ 10 (lower = AI is less random)</span>
-  </div>
+<div class="charts">
+  <div class="ch"><h3>Avg Reward — total score per episode (higher = better)</h3><canvas id="c0"></canvas></div>
+  <div class="ch"><h3>Entropy — policy randomness (lower = more confident)</h3><canvas id="c1"></canvas></div>
+  <div class="ch"><h3>Value Loss — critic prediction error</h3><canvas id="c2"></canvas></div>
+  <div class="ch"><h3>Avg Length — ticks per episode</h3><canvas id="c3"></canvas></div>
 </div>
-
-<div class="chart-box">
-  <h3>Training Health</h3>
-  <canvas id="c2"></canvas>
-  <div class="leg">
-    <span><i style="background:#89b4fa"></i> Value Loss (critic accuracy)</span>
-    <span><i style="background:#f9e2af"></i> Avg Length ÷ 5 (episode duration)</span>
-  </div>
-</div>
-
-<div class="foot">
-  <span id="st">Waiting for training signal…</span>
-  <span id="sp">—</span>
-</div>
+<div class="foot"><span id="st">Waiting…</span><span id="sp"></span></div>
 
 <script>
-const MAX=400;
-const H={rew:[],ent:[],vl:[],len:[]};
-let ls=0,lt=Date.now();
-
+const MAX=400,H={rew:[],ent:[],vl:[],len:[]};let ls=0,lt=Date.now();
 async function poll(){
-  try{
-    const r=await fetch("/training_status.json");
-    if(!r.ok)return;
-    const s=await r.json();
-    const n=Date.now(),dt=(n-lt)/1000,ds=s.steps-ls,sps=dt>0?Math.round(ds/dt):0;
-    ls=s.steps;lt=n;
+  try{const r=await fetch("/training_status.json");if(!r.ok)return;const s=await r.json();
+    const n=Date.now(),dt=(n-lt)/1000,ds=s.steps-ls,sps=dt>0?Math.round(ds/dt):0;ls=s.steps;lt=n;
     document.getElementById("prog").style.width=(s.iter/2000*100)+"%";
-    const rewClass=s.avg_rew>40?"good":s.avg_rew>15?"warn":"bad";
-    const entClass=s.ent<8?"good":s.ent<12?"warn":"bad";
-    const vlClass=s.v_loss<0.15?"good":"warn";
     document.getElementById("cards").innerHTML=
-      `<div class="card ${rewClass}"><div class="lbl">Avg Reward</div><div class="val">${s.avg_rew.toFixed(1)}</div><div class="sub">total score per episode</div></div>
-       <div class="card ${entClass}"><div class="lbl">Entropy</div><div class="val">${s.ent.toFixed(2)}</div><div class="sub">max 13.86 · target &lt;6</div></div>
-       <div class="card ${vlClass}"><div class="lbl">Value Loss</div><div class="val">${s.v_loss.toFixed(3)}</div><div class="sub">critic error · lower=better</div></div>
-       <div class="card"><div class="lbl">Iteration</div><div class="val b">${s.iter}<span class="d" style="font-size:14px">/2000</span></div><div class="sub">${(s.iter/2000*100).toFixed(0)}% complete</div></div>
-       <div class="card"><div class="lbl">Steps</div><div class="val d">${(s.steps/1e6).toFixed(2)}M</div><div class="sub">${sps} steps/sec</div></div>
-       <div class="card"><div class="lbl">Avg Length</div><div class="val d">${s.avg_len.toFixed(0)}</div><div class="sub">ticks per episode</div></div>`;
-    push(H.rew,s.avg_rew);push(H.ent,s.ent/10);push(H.vl,s.v_loss);push(H.len,s.avg_len/5);
-    chart("c1",[{d:H.rew,c:"#a6e3a1",lo:-10,hi:120},{d:H.ent,c:"#f38ba8",lo:0,hi:14}]);
-    chart("c2",[{d:H.vl,c:"#89b4fa",lo:0,hi:3},{d:H.len,c:"#f9e2af",lo:0,hi:80}]);
+      `<div class="card"><div class="l">Avg Reward</div><div class="v ${s.avg_rew>80?'g':s.avg_rew>30?'y':'r'}">${s.avg_rew.toFixed(1)}</div><div class="s">total score per episode</div></div>
+       <div class="card"><div class="l">Entropy</div><div class="v ${s.ent<8?'g':s.ent<12?'y':'r'}">${s.ent.toFixed(2)}</div><div class="s">max 13.86 · target &lt;6</div></div>
+       <div class="card"><div class="l">Value Loss</div><div class="v ${s.v_loss<.15?'g':'y'}">${s.v_loss.toFixed(3)}</div><div class="s">critic error</div></div>
+       <div class="card"><div class="l">Iteration</div><div class="v b">${s.iter}<span class="d" style="font-size:14px">/2000</span></div><div class="s">${(s.iter/2000*100).toFixed(0)}% · ${(s.steps/1e6).toFixed(1)}M steps</div></div>
+       <div class="card"><div class="l">Speed</div><div class="v d">${sps}</div><div class="s">steps/sec</div></div>
+       <div class="card"><div class="l">Avg Length</div><div class="v d">${s.avg_len.toFixed(0)}</div><div class="s">ticks per episode</div></div>`;
+    push(H.rew,s.avg_rew);push(H.ent,s.ent);push(H.vl,s.v_loss);push(H.len,s.avg_len);
+    chart("c0",[{d:H.rew,c:"#a6e3a1",lo:0,hi:200}]);
+    chart("c1",[{d:H.ent,c:"#f38ba8",lo:0,hi:14}]);
+    chart("c2",[{d:H.vl,c:"#89b4fa",lo:0,hi:5}]);
+    chart("c3",[{d:H.len,c:"#f9e2af",lo:0,hi:500}]);
     document.getElementById("st").textContent=`Updated ${new Date().toLocaleTimeString()}`;
     document.getElementById("sp").textContent=`${sps} steps/sec`;
   }catch(e){}
 }
 function push(a,v){a.push(v);if(a.length>MAX)a.shift()}
 function chart(id,series){
-  const c=document.getElementById(id),ctx=c.getContext("2d");
-  c.width=c.parentElement.clientWidth-32;
-  const W=c.width,H=c.height,PL=38,PR=8,PT=6,PB=20;
-  ctx.clearRect(0,0,W,H);
+  const c=document.getElementById(id),ctx=c.getContext("2d"),W=c.parentElement.clientWidth-28,H=180,PL=36,PR=6,PT=4,PB=18;
+  c.width=W;ctx.clearRect(0,0,W,H);
   ctx.strokeStyle="#1a1b26";ctx.lineWidth=1;
   for(let i=0;i<=4;i++){const y=PT+(H-PT-PB)*i/4;ctx.beginPath();ctx.moveTo(PL,y);ctx.lineTo(W-PR,y);ctx.stroke()}
   ctx.fillStyle="#45475a";ctx.font="9px monospace";ctx.textAlign="right";
   for(let i=0;i<=4;i++){const y=PT+(H-PT-PB)*(4-i)/4;ctx.fillText((series[0].lo+(series[0].hi-series[0].lo)*i/4).toFixed(0),PL-5,y+3)}
-  for(const s of series){
-    if(s.d.length<2)continue;
+  for(const s of series){if(s.d.length<2)continue;
     const xs=(W-PL-PR)/Math.max(s.d.length-1,1),ys=(H-PT-PB)/(s.hi-s.lo||1);
-    // Gradient fill
-    const grad=ctx.createLinearGradient(0,PT,0,H-PB);
-    grad.addColorStop(0,s.c+"44");grad.addColorStop(1,s.c+"04");
+    const grad=ctx.createLinearGradient(0,PT,0,H-PB);grad.addColorStop(0,s.c+"44");grad.addColorStop(1,s.c+"04");
     ctx.fillStyle=grad;ctx.beginPath();
     for(let i=0;i<s.d.length;i++){const x=PL+i*xs,y=PT+(H-PT-PB)-(s.d[i]-s.lo)*ys;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
     ctx.lineTo(PL+(s.d.length-1)*xs,H-PB);ctx.lineTo(PL,H-PB);ctx.closePath();ctx.fill();
-    // Line
     ctx.strokeStyle=s.c;ctx.lineWidth=2;ctx.beginPath();
     for(let i=0;i<s.d.length;i++){const x=PL+i*xs,y=PT+(H-PT-PB)-(s.d[i]-s.lo)*ys;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
     ctx.stroke();
