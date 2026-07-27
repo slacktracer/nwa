@@ -662,13 +662,15 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=64, help="Episodes per iteration")
     parser.add_argument("--checkpoint-dir", default="checkpoints", help="Checkpoint output directory")
     parser.add_argument("--save-interval", type=int, default=200, help="Checkpoint save interval")
-    parser.add_argument("--num-workers", type=int, default=4, help="Number of parallel bridge workers")
+    parser.add_argument("--num-workers", type=int, default=4, help="Number of parallel envs")
+    parser.add_argument("--hid-dim", type=int, default=256, help="Hidden layer size")
     parser.add_argument("--resume", default=None, help="Resume from checkpoint path")
     args = parser.parse_args()
 
     config = Config(
         num_players=args.players,
         lr=args.lr,
+        hid_dim=args.hid_dim,
         total_iters=args.iters,
         episodes_per_iter=args.episodes,
         checkpoint_dir=args.checkpoint_dir,
