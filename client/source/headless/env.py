@@ -601,6 +601,12 @@ class NWAEnv:
         # Collect death/detonation events
         self._collect_events()
 
+        # Survival bonus: small reward per alive ship per tick.
+        # This makes the reward signal dense so the policy can learn.
+        for i in range(self.num_players):
+            if self._ships[i]["live"]:
+                self.rewards[i] += 0.01
+
         self.tick += 1
 
         # Check termination
