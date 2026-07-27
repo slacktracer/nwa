@@ -42,7 +42,7 @@ import torch.optim as optim
 @dataclass
 class Config:
     num_players: int = 4
-    hid_dim: int = 64
+    hid_dim: int = 256
 
     def __post_init__(self):
         self.obs_dim = self.num_players * 8 + 1
@@ -219,6 +219,25 @@ class NWABridge:
         return json.loads(line)
 
 
+# ── Python-native env wrapper ──────────────────────────────────────────────
+
+from env import NWAEnv as PyEnv
+
+class PythonEnv:
+    """Thin wrapper matching the bridge API but using Python env directly."""
+    def __init__(self, num_players: int):
+        self.env = PyEnv(num_players)
+
+    def reset(self) -> dict[str, Any]:
+        return self.env.reset()
+
+    def step(self, actions: list[dict[str, bool]]) -> dict[str, Any]:
+        return self.env.step(actions)
+
+    def close(self) -> None:
+        pass
+
+
 # ── observation helper ────────────────────────────────────────────────────
 
 def flat_obs(obs: dict[str, Any], num_players: int) -> list[float]:
@@ -236,7 +255,6 @@ def flat_obs(obs: dict[str, Any], num_players: int) -> list[float]:
             s["missiles"],
             s["alive"],
         ])
-    # Pad if fewer ships than expected
     while len(arr) < num_players * 8:
         arr.extend([0.0] * 8)
     arr.append(obs.get("starRadius", 0.0) / 60.0)
@@ -504,17 +522,17 @@ def load_checkpoint(
 # ── parallel episode runner ────────────────────────────────────────────────
 
 def _run_episodes_batched(
-    bridges: list[NWABridge],
+    envs: list[PythonEnv | NWABridge],
     net: PPONet,
     config: Config,
     device: torch.device,
 ) -> tuple[list[list[dict[str, Any]]], list[float], list[int]]:
-    """Run one episode per bridge in lockstep, batching GPU inference."""
-    active = list(range(len(bridges)))
-    obs_list: list[dict[str, Any] | None] = [b.reset() for b in bridges]
-    all_steps: list[list[dict[str, Any]]] = [[] for _ in bridges]
-    all_rewards: list[float] = [0.0] * len(bridges)
-    all_lengths: list[int] = [0] * len(bridges)
+    """Run one episode per env in lockstep, batching GPU inference."""
+    active = list(range(len(envs)))
+    obs_list: list[dict[str, Any] | None] = [e.reset() for e in envs]
+    all_steps: list[list[dict[str, Any]]] = [[] for _ in envs]
+    all_rewards: list[float] = [0.0] * len(envs)
+    all_lengths: list[int] = [0] * len(envs)
 
     for _step in range(config.max_episode_steps):
         if not active:
@@ -528,7 +546,7 @@ def _run_episodes_batched(
         new_active = []
         for i, idx in enumerate(active):
             actions_dict = tensor_to_actions(actions_t[i], config.num_players)
-            result = bridges[idx].step(actions_dict)
+            result = envs[idx].step(actions_dict)
             reward = sum(result.get("rewards", []))
             done = result.get("done", False)
             all_steps[idx].append({
@@ -565,10 +583,9 @@ def train(config: Config) -> None:
     episode_rewards: deque[float] = deque(maxlen=100)
     episode_lengths: deque[int] = deque(maxlen=100)
 
-    print(f"Starting {config.num_workers} bridge workers...")
-    bridges = [NWABridge(config.deno_path, config.bridge_path, config.num_players)
-               for _ in range(config.num_workers)]
-    print("All bridges ready.\n")
+    print(f"Creating {config.num_workers} Python envs (no subprocess)...")
+    envs = [PythonEnv(config.num_players) for _ in range(config.num_workers)]
+    print("All envs ready.\n")
 
     total_steps = 0
 
@@ -580,11 +597,11 @@ def train(config: Config) -> None:
 
             # Run episodes in lockstep batches — GPU inference for each step
             for batch_start in range(0, config.episodes_per_iter, config.num_workers):
-                batch_bridges = bridges[:min(config.num_workers, config.episodes_per_iter - batch_start)]
+                batch_envs = envs[:min(config.num_workers, config.episodes_per_iter - batch_start)]
                 all_steps, all_rewards, all_lengths = _run_episodes_batched(
-                    batch_bridges, net, config, device
+                    batch_envs, net, config, device
                 )
-                for ep_idx in range(len(batch_bridges)):
+                for ep_idx in range(len(batch_envs)):
                     for s in all_steps[ep_idx]:
                         buffer.add(
                             s["obs"].to(device), s["actions"].to(device),
@@ -625,8 +642,8 @@ def train(config: Config) -> None:
         print("\nInterrupted. Saving checkpoint...")
         save_checkpoint(net, optimizer, 0, config, {"interrupted": True})
     finally:
-        for bridge in bridges:
-            bridge.close()
+        for e in envs:
+            e.close()
 
     # Final save
     save_checkpoint(net, optimizer, config.total_iters, config, {})
