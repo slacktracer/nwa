@@ -3,150 +3,122 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NWA Training Dashboard</title>
+<title>NWA Training</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { background: #0d1117; color: #c9d1d9; font: 14px/1.5 monospace; padding: 24px; }
-  h1 { color: #58a6ff; margin-bottom: 4px; }
-  .subtitle { color: #8b949e; font-size: 12px; margin-bottom: 20px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 20px; }
-  .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px 16px; }
-  .card .label { font-size: 10px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
-  .card .val { font-size: 26px; font-weight: bold; line-height: 1.1; }
-  .card .hint { font-size: 10px; color: #484f58; margin-top: 4px; }
-  .green { color: #3fb950; } .yellow { color: #d2991d; } .red { color: #f85149; }
-  .blue { color: #58a6ff; } .gray { color: #8b949e; }
-  .chart-wrap { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
-  .chart-title { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-  .chart-title span { color: #c9d1d9; }
-  canvas { width: 100%; height: 260px; }
-  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 6px; font-size: 11px; }
-  .legend-item { display: flex; align-items: center; gap: 4px; }
-  .legend-swatch { width: 12px; height: 3px; border-radius: 2px; display: inline-block; }
-  #footer { font-size: 11px; color: #484f58; margin-top: 16px; display: flex; justify-content: space-between; }
-  .tooltip { background: #21262d; border: 1px solid #30363d; padding: 8px 12px; border-radius: 6px; font-size: 11px; position: absolute; display: none; pointer-events: none; z-index: 10; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0a0e14; color:#cdd6f4; font:13px/1.4 'SF Mono','Cascadia Code',monospace; padding:28px 32px; max-width:1100px; margin:0 auto; }
+  .top { display:flex; align-items:baseline; gap:12px; margin-bottom:6px; flex-wrap:wrap; }
+  h1 { font-size:20px; color:#89b4fa; font-weight:700; }
+  .badge { font-size:10px; padding:2px 8px; border-radius:10px; font-weight:600; }
+  .badge-gpu { background:#1e3a5f; color:#89b4fa; }
+  .badge-live { background:#1a3a1a; color:#a6e3a1; animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  .progress-wrap { background:#181825; border-radius:6px; height:4px; margin:10px 0 18px; overflow:hidden; }
+  .progress-bar { height:100%; background:linear-gradient(90deg,#89b4fa,#a6e3a1); border-radius:6px; transition:width .5s; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:8px; margin-bottom:18px; }
+  .card { background:#11121c; border:1px solid #1e2030; border-radius:10px; padding:12px 14px; position:relative; overflow:hidden; }
+  .card::after { content:''; position:absolute; top:0;left:0;right:0;height:2px; opacity:.6; }
+  .card.good::after { background:#a6e3a1; } .card.warn::after { background:#f9e2af; } .card.bad::after { background:#f38ba8; }
+  .card .lbl { font-size:9px; color:#585b70; text-transform:uppercase; letter-spacing:.6px; }
+  .card .val { font-size:28px; font-weight:800; line-height:1; margin:2px 0; }
+  .card .sub { font-size:10px; color:#45475a; }
+  .g { color:#a6e3a1; } .y { color:#f9e2af; } .r { color:#f38ba8; } .b { color:#89b4fa; } .d { color:#6c7086; }
+  .chart-box { background:#11121c; border:1px solid #1e2030; border-radius:10px; padding:14px 16px 10px; margin-bottom:10px; }
+  .chart-box h3 { font-size:10px; color:#585b70; text-transform:uppercase; letter-spacing:.5px; margin-bottom:6px; }
+  canvas { width:100%; height:220px; display:block; }
+  .leg { display:flex; gap:14px; margin-top:4px; font-size:10px; color:#585b70; flex-wrap:wrap; }
+  .leg i { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; vertical-align:middle; }
+  .foot { margin-top:10px; font-size:10px; color:#45475a; display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px; }
 </style>
 </head>
 <body>
-<h1>⚔ NWA Training</h1>
-<div class="subtitle">4 players · 512 hidden · 64 workers · GPU · survival bonus +0.05/tick</div>
+<div class="top">
+  <h1>NWA Training</h1>
+  <span class="badge badge-gpu">GPU · RTX 5070 Ti</span>
+  <span class="badge badge-live" id="live">LIVE</span>
+</div>
+<div class="progress-wrap"><div class="progress-bar" id="prog" style="width:0%"></div></div>
+<div class="cards" id="cards"></div>
 
-<div class="grid" id="cards"></div>
-
-<div class="chart-wrap">
-  <div class="chart-title">📈 <span>Reward &amp; Episode Length</span> — the two most important signals</div>
+<div class="chart-box">
+  <h3>Reward &amp; Entropy — the two signals that matter</h3>
   <canvas id="c1"></canvas>
-  <div class="legend">
-    <div class="legend-item"><span class="legend-swatch" style="background:#3fb950"></span> Avg Reward — total score per episode (higher = better)</div>
-    <div class="legend-item"><span class="legend-swatch" style="background:#58a6ff"></span> Avg Length ÷ 10 — how many ticks episodes last</div>
-  </div>
-</div>
-<div class="chart-wrap">
-  <div class="chart-title">📉 <span>Policy Entropy</span> — randomness of the AI (lower = more confident)</div>
-  <canvas id="c2"></canvas>
-  <div class="legend">
-    <div class="legend-item"><span class="legend-swatch" style="background:#f0883e"></span> Entropy — max 13.86 (pure random), target 3–6 (skilled)</div>
-  </div>
-</div>
-<div class="chart-wrap">
-  <div class="chart-title">📊 <span>Losses</span> — training diagnostics (lower is healthier)</div>
-  <canvas id="c3"></canvas>
-  <div class="legend">
-    <div class="legend-item"><span class="legend-swatch" style="background:#f85149"></span> Policy Loss — gradient signal strength (should fluctuate near 0)</div>
-    <div class="legend-item"><span class="legend-swatch" style="background:#d2991d"></span> Value Loss — how accurate the critic is (should decrease)</div>
+  <div class="leg">
+    <span><i style="background:#a6e3a1"></i> Avg Reward (higher = AI is winning more)</span>
+    <span><i style="background:#f38ba8"></i> Entropy ÷ 10 (lower = AI is less random)</span>
   </div>
 </div>
 
-<div id="footer">
-  <span id="status">Waiting…</span>
-  <span id="speed"></span>
+<div class="chart-box">
+  <h3>Training Health</h3>
+  <canvas id="c2"></canvas>
+  <div class="leg">
+    <span><i style="background:#89b4fa"></i> Value Loss (critic accuracy)</span>
+    <span><i style="background:#f9e2af"></i> Avg Length ÷ 5 (episode duration)</span>
+  </div>
+</div>
+
+<div class="foot">
+  <span id="st">Waiting for training signal…</span>
+  <span id="sp">—</span>
 </div>
 
 <script>
-const MAX = 300;
-const H = { rew: [], len: [], ent: [], pl: [], vl: [] };
-let lastSteps = 0, lastTime = Date.now();
+const MAX=400;
+const H={rew:[],ent:[],vl:[],len:[]};
+let ls=0,lt=Date.now();
 
-async function poll() {
-  try {
-    const r = await fetch("/training_status.json");
-    if (!r.ok) throw 0;
-    const s = await r.json();
-    const now = Date.now();
-    const dt = (now - lastTime) / 1000;
-    const ds = s.steps - lastSteps;
-    const sps = dt > 0 ? Math.round(ds / dt) : 0;
-    lastSteps = s.steps; lastTime = now;
-
-    document.getElementById("cards").innerHTML = `
-      <div class="card"><div class="label">Iteration</div><div class="val blue">${s.iter}</div><div class="hint">of 2000 · ${Math.round(s.iter/2000*100)}%</div></div>
-      <div class="card"><div class="label">Avg Reward</div><div class="val ${s.avg_rew > 50 ? 'green' : s.avg_rew > 20 ? 'yellow' : 'red'}">${s.avg_rew.toFixed(1)}</div><div class="hint">per episode · trend ${s.avg_rew > 30 ? '↑ healthy' : '↓ needs time'}</div></div>
-      <div class="card"><div class="label">Entropy</div><div class="val ${s.ent < 10 ? 'green' : s.ent < 13 ? 'yellow' : 'red'}">${s.ent.toFixed(2)}</div><div class="hint">max 13.86 · ${s.ent < 10 ? 'learning!' : s.ent < 13 ? 'early signs' : 'still random'}</div></div>
-      <div class="card"><div class="label">Avg Length</div><div class="val gray">${s.avg_len.toFixed(0)}</div><div class="hint">ticks per episode</div></div>
-      <div class="card"><div class="label">Value Loss</div><div class="val ${s.v_loss < 0.2 ? 'green' : 'yellow'}">${s.v_loss.toFixed(3)}</div><div class="hint">critic accuracy</div></div>
-      <div class="card"><div class="label">Steps</div><div class="val gray">${(s.steps/1e6).toFixed(2)}M</div><div class="hint">${sps} steps/sec</div></div>
-    `;
-
-    push(H.rew, s.avg_rew); push(H.len, s.avg_len / 10);
-    push(H.ent, s.ent); push(H.pl, s.p_loss * 1000); push(H.vl, s.v_loss);
-
-    chart("c1", [
-      { d: H.rew, c: "#3fb950", min: -10, max: 120 },
-      { d: H.len, c: "#58a6ff", min: 0, max: 80 },
-    ]);
-    chart("c2", [
-      { d: H.ent, c: "#f0883e", min: 0, max: 14 },
-    ]);
-    chart("c3", [
-      { d: H.pl,  c: "#f85149", min: -5, max: 5 },
-      { d: H.vl,  c: "#d2991d", min: 0, max: 3 },
-    ]);
-
-    document.getElementById("status").textContent = `Updated ${new Date().toLocaleTimeString()}`;
-    document.getElementById("speed").textContent = `${sps} steps/sec`;
-  } catch(e) {
-    // waiting for first data
-  }
+async function poll(){
+  try{
+    const r=await fetch("/training_status.json");
+    if(!r.ok)return;
+    const s=await r.json();
+    const n=Date.now(),dt=(n-lt)/1000,ds=s.steps-ls,sps=dt>0?Math.round(ds/dt):0;
+    ls=s.steps;lt=n;
+    document.getElementById("prog").style.width=(s.iter/2000*100)+"%";
+    const rewClass=s.avg_rew>40?"good":s.avg_rew>15?"warn":"bad";
+    const entClass=s.ent<8?"good":s.ent<12?"warn":"bad";
+    const vlClass=s.v_loss<0.15?"good":"warn";
+    document.getElementById("cards").innerHTML=
+      `<div class="card ${rewClass}"><div class="lbl">Avg Reward</div><div class="val">${s.avg_rew.toFixed(1)}</div><div class="sub">total score per episode</div></div>
+       <div class="card ${entClass}"><div class="lbl">Entropy</div><div class="val">${s.ent.toFixed(2)}</div><div class="sub">max 13.86 · target &lt;6</div></div>
+       <div class="card ${vlClass}"><div class="lbl">Value Loss</div><div class="val">${s.v_loss.toFixed(3)}</div><div class="sub">critic error · lower=better</div></div>
+       <div class="card"><div class="lbl">Iteration</div><div class="val b">${s.iter}<span class="d" style="font-size:14px">/2000</span></div><div class="sub">${(s.iter/2000*100).toFixed(0)}% complete</div></div>
+       <div class="card"><div class="lbl">Steps</div><div class="val d">${(s.steps/1e6).toFixed(2)}M</div><div class="sub">${sps} steps/sec</div></div>
+       <div class="card"><div class="lbl">Avg Length</div><div class="val d">${s.avg_len.toFixed(0)}</div><div class="sub">ticks per episode</div></div>`;
+    push(H.rew,s.avg_rew);push(H.ent,s.ent/10);push(H.vl,s.v_loss);push(H.len,s.avg_len/5);
+    chart("c1",[{d:H.rew,c:"#a6e3a1",lo:-10,hi:120},{d:H.ent,c:"#f38ba8",lo:0,hi:14}]);
+    chart("c2",[{d:H.vl,c:"#89b4fa",lo:0,hi:3},{d:H.len,c:"#f9e2af",lo:0,hi:80}]);
+    document.getElementById("st").textContent=`Updated ${new Date().toLocaleTimeString()}`;
+    document.getElementById("sp").textContent=`${sps} steps/sec`;
+  }catch(e){}
 }
-
-function push(arr, v) { arr.push(v); if (arr.length > MAX) arr.shift(); }
-
-function chart(id, series) {
-  const c = document.getElementById(id);
-  c.width = c.parentElement.clientWidth - 32;
-  const ctx = c.getContext("2d");
-  const W = c.width, H = c.height, padL = 40, padR = 10, padT = 10, padB = 25;
-  ctx.clearRect(0, 0, W, H);
-
-  // Grid
-  ctx.strokeStyle = "#21262d"; ctx.lineWidth = 1;
-  for (let i = 0; i <= 4; i++) {
-    const y = padT + (H - padT - padB) * i / 4;
-    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(W - padR, y); ctx.stroke();
-  }
-  // Left axis labels
-  ctx.fillStyle = "#484f58"; ctx.font = "10px monospace"; ctx.textAlign = "right";
-  for (let i = 0; i <= 4; i++) {
-    const y = padT + (H - padT - padB) * (4 - i) / 4;
-    const label = (series[0].min + (series[0].max - series[0].min) * i / 4).toFixed(0);
-    ctx.fillText(label, padL - 6, y + 3);
-  }
-
-  for (const s of series) {
-    if (s.d.length < 2) continue;
-    ctx.strokeStyle = s.c; ctx.lineWidth = 2; ctx.beginPath();
-    const xs = (W - padL - padR) / Math.max(s.d.length - 1, 1);
-    const ys = (H - padT - padB) / (s.max - s.min || 1);
-    for (let i = 0; i < s.d.length; i++) {
-      const x = padL + i * xs;
-      const y = padT + (H - padT - padB) - (s.d[i] - s.min) * ys;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    }
+function push(a,v){a.push(v);if(a.length>MAX)a.shift()}
+function chart(id,series){
+  const c=document.getElementById(id),ctx=c.getContext("2d");
+  c.width=c.parentElement.clientWidth-32;
+  const W=c.width,H=c.height,PL=38,PR=8,PT=6,PB=20;
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle="#1a1b26";ctx.lineWidth=1;
+  for(let i=0;i<=4;i++){const y=PT+(H-PT-PB)*i/4;ctx.beginPath();ctx.moveTo(PL,y);ctx.lineTo(W-PR,y);ctx.stroke()}
+  ctx.fillStyle="#45475a";ctx.font="9px monospace";ctx.textAlign="right";
+  for(let i=0;i<=4;i++){const y=PT+(H-PT-PB)*(4-i)/4;ctx.fillText((series[0].lo+(series[0].hi-series[0].lo)*i/4).toFixed(0),PL-5,y+3)}
+  for(const s of series){
+    if(s.d.length<2)continue;
+    const xs=(W-PL-PR)/Math.max(s.d.length-1,1),ys=(H-PT-PB)/(s.hi-s.lo||1);
+    // Gradient fill
+    const grad=ctx.createLinearGradient(0,PT,0,H-PB);
+    grad.addColorStop(0,s.c+"44");grad.addColorStop(1,s.c+"04");
+    ctx.fillStyle=grad;ctx.beginPath();
+    for(let i=0;i<s.d.length;i++){const x=PL+i*xs,y=PT+(H-PT-PB)-(s.d[i]-s.lo)*ys;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
+    ctx.lineTo(PL+(s.d.length-1)*xs,H-PB);ctx.lineTo(PL,H-PB);ctx.closePath();ctx.fill();
+    // Line
+    ctx.strokeStyle=s.c;ctx.lineWidth=2;ctx.beginPath();
+    for(let i=0;i<s.d.length;i++){const x=PL+i*xs,y=PT+(H-PT-PB)-(s.d[i]-s.lo)*ys;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)}
     ctx.stroke();
   }
 }
-
-poll(); setInterval(poll, 3000);
+poll();setInterval(poll,3000);
 </script>
 </body>
 </html>
