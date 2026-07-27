@@ -22,16 +22,13 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import copy
 import json
 import math
 import os
 import subprocess
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from threading import Lock
 from typing import Any
 
 import torch
@@ -506,47 +503,47 @@ def load_checkpoint(
 
 # ── parallel episode runner ────────────────────────────────────────────────
 
-def _run_episode(
-    bridge: NWABridge,
-    cpu_net: PPONet,
+def _run_episodes_batched(
+    bridges: list[NWABridge],
+    net: PPONet,
     config: Config,
-) -> tuple[list[dict[str, Any]], float, int]:
-    """Run one episode and return (trajectory_steps, total_reward, length)."""
-    obs = bridge.reset()
-    steps: list[dict[str, Any]] = []
-    ep_reward = 0.0
-    ep_len = 0
+    device: torch.device,
+) -> tuple[list[list[dict[str, Any]]], list[float], list[int]]:
+    """Run one episode per bridge in lockstep, batching GPU inference."""
+    active = list(range(len(bridges)))
+    obs_list: list[dict[str, Any] | None] = [b.reset() for b in bridges]
+    all_steps: list[list[dict[str, Any]]] = [[] for _ in bridges]
+    all_rewards: list[float] = [0.0] * len(bridges)
+    all_lengths: list[int] = [0] * len(bridges)
 
     for _step in range(config.max_episode_steps):
-        obs_flat = flat_obs(obs, config.num_players)
-        obs_t = torch.tensor(obs_flat, dtype=torch.float32).unsqueeze(0)
-
-        with torch.no_grad():
-            actions_t, log_probs_t, values_t = cpu_net.get_action(obs_t)
-
-        actions_dict = tensor_to_actions(actions_t.squeeze(0), config.num_players)
-        result = bridge.step(actions_dict)
-
-        reward = sum(result.get("rewards", []))
-        done = result.get("done", False)
-
-        steps.append({
-            "obs": obs_t.squeeze(0),
-            "actions": actions_t.squeeze(0),
-            "log_probs": log_probs_t.squeeze(0),
-            "values": values_t.squeeze(0),
-            "reward": reward,
-            "done": done,
-        })
-
-        ep_reward += reward
-        ep_len += 1
-
-        if done:
+        if not active:
             break
-        obs = result["obs"]
+        # GPU batched inference
+        batch_obs = [flat_obs(obs_list[idx], config.num_players) for idx in active]
+        obs_t = torch.tensor(batch_obs, dtype=torch.float32, device=device)
+        with torch.no_grad():
+            actions_t, log_probs_t, values_t = net.get_action(obs_t)
 
-    return steps, ep_reward, ep_len
+        new_active = []
+        for i, idx in enumerate(active):
+            actions_dict = tensor_to_actions(actions_t[i], config.num_players)
+            result = bridges[idx].step(actions_dict)
+            reward = sum(result.get("rewards", []))
+            done = result.get("done", False)
+            all_steps[idx].append({
+                "obs": obs_t[i].cpu(), "actions": actions_t[i].cpu(),
+                "log_probs": log_probs_t[i].cpu(), "values": values_t[i].cpu(),
+                "reward": reward, "done": done,
+            })
+            all_rewards[idx] += reward
+            all_lengths[idx] += 1
+            if not done:
+                obs_list[idx] = result["obs"]
+                new_active.append(idx)
+        active = new_active
+
+    return all_steps, all_rewards, all_lengths
 
 
 # ── main training loop ────────────────────────────────────────────────────
@@ -581,35 +578,23 @@ def train(config: Config) -> None:
             iter_steps = 0
             iter_ep_rewards: list[float] = []
 
-            # Copy net to CPU for parallel inference (8k params, fast)
-            cpu_net = copy.deepcopy(net).cpu()
-
-            # Divide episodes among workers
-            eps_per_worker = config.episodes_per_iter // config.num_workers
-            remaining = config.episodes_per_iter % config.num_workers
-
-            for batch_idx in range(0, config.episodes_per_iter, config.num_workers):
-                batch_size = min(config.num_workers, config.episodes_per_iter - batch_idx)
-                futures = []
-                with ThreadPoolExecutor(max_workers=batch_size) as pool:
-                    for w in range(batch_size):
-                        futures.append(pool.submit(_run_episode, bridges[w], cpu_net, config))
-
-                    for future in as_completed(futures):
-                        steps, ep_reward, ep_len = future.result()
-                        for s in steps:
-                            buffer.add(
-                                s["obs"].to(device),
-                                s["actions"].to(device),
-                                s["log_probs"].to(device),
-                                s["values"].to(device),
-                                s["reward"],
-                                s["done"],
-                            )
-                        iter_ep_rewards.append(ep_reward)
-                        episode_rewards.append(ep_reward)
-                        episode_lengths.append(ep_len)
-                        iter_steps += ep_len
+            # Run episodes in lockstep batches — GPU inference for each step
+            for batch_start in range(0, config.episodes_per_iter, config.num_workers):
+                batch_bridges = bridges[:min(config.num_workers, config.episodes_per_iter - batch_start)]
+                all_steps, all_rewards, all_lengths = _run_episodes_batched(
+                    batch_bridges, net, config, device
+                )
+                for ep_idx in range(len(batch_bridges)):
+                    for s in all_steps[ep_idx]:
+                        buffer.add(
+                            s["obs"].to(device), s["actions"].to(device),
+                            s["log_probs"].to(device), s["values"].to(device),
+                            s["reward"], s["done"],
+                        )
+                    iter_ep_rewards.append(all_rewards[ep_idx])
+                    episode_rewards.append(all_rewards[ep_idx])
+                    episode_lengths.append(all_lengths[ep_idx])
+                    iter_steps += all_lengths[ep_idx]
 
             total_steps += iter_steps
 
