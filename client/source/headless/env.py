@@ -601,11 +601,15 @@ class NWAEnv:
         # Collect death/detonation events
         self._collect_events()
 
-        # Survival bonus: small reward per alive ship per tick.
-        # This makes the reward signal dense so the policy can learn.
+        # Dense reward: survival + distance from star
         for i in range(self.num_players):
-            if self._ships[i]["live"]:
-                self.rewards[i] += 0.05
+            ship = self._ships[i]
+            if ship["live"]:
+                # Small survival bonus (keeps gradient flowing)
+                self.rewards[i] += 0.01
+                # Distance bonus: encourages orbiting, not sitting still
+                dist = math.sqrt(ship["position"][0]**2 + ship["position"][1]**2)
+                self.rewards[i] += dist * 0.001
 
         self.tick += 1
 
