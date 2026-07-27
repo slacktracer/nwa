@@ -605,7 +605,7 @@ class NWAEnv:
         # This makes the reward signal dense so the policy can learn.
         for i in range(self.num_players):
             if self._ships[i]["live"]:
-                self.rewards[i] += 0.01
+                self.rewards[i] += 0.05
 
         self.tick += 1
 
