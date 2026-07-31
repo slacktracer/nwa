@@ -26,13 +26,20 @@
           <br>
           <div>
             <label for="aiplayers">AI Players</label>
-            <select id="aiplayers">
+            <select id="aiplayers" onchange="syncAI()">
               <option selected value="0">0 (human only)</option>
               <option value="1">1 AI</option>
               <option value="2">2 AI</option>
               <option value="3">3 AI</option>
               <option value="4">4 AI (watch)</option>
             </select>
+          </div>
+          <br>
+          <div>
+            <label>
+              <input type="checkbox" id="clearmissiles" checked>
+              Clear missiles on restart
+            </label>
           </div>
           <br>
           <button id="start" type="submit">Start</button>
@@ -79,6 +86,22 @@
       <span class="score">0</span>
     </div>
 
+    <script>
+      function syncAI() {
+        const ai = document.getElementById("aiplayers");
+        const pl = document.getElementById("players");
+        const a = parseInt(ai.value);
+        const p = parseInt(pl.value);
+        if (a > p) pl.value = String(Math.min(a, 4));
+      }
+      document.getElementById("players").onchange = function() {
+        const ai = document.getElementById("aiplayers");
+        const pl = document.getElementById("players");
+        const a = parseInt(ai.value);
+        const p = parseInt(pl.value);
+        if (a > p) ai.value = String(p);
+      };
+    </script>
     <script type="module" src="source/main.ts"></script>
   </body>
 </html>

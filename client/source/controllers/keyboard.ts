@@ -15,6 +15,7 @@ const PLAYER_KEYS: Array<{
 
 export class KeyboardController implements Controller {
   private keys = new Set<number>();
+  private edgeKeys = new Set<number>();  // one-shot: consumed on read
   private map: typeof PLAYER_KEYS[0];
 
   constructor(shipIndex: number) {
@@ -22,20 +23,36 @@ export class KeyboardController implements Controller {
   }
 
   init(): void {
-    on("keydown", (e: Event) => { this.keys.add((e as KeyboardEvent).keyCode); });
-    on("keyup", (e: Event) => { this.keys.delete((e as KeyboardEvent).keyCode); });
+    on("keydown", (e: Event) => {
+      const k = (e as KeyboardEvent).keyCode;
+      // Only treat as edge if this is a fresh press (not a key repeat)
+      const isRepeat = this.keys.has(k);
+      this.keys.add(k);
+      if (!isRepeat) this.edgeKeys.add(k);
+    });
+    on("keyup", (e: Event) => {
+      const k = (e as KeyboardEvent).keyCode;
+      this.keys.delete(k);
+      this.edgeKeys.delete(k);
+    });
   }
 
   getAction(): Action {
     const d = this.keys;
+    const firePressed = this.edgeKeys.has(this.map.fire);
+    const clearPressed = this.edgeKeys.has(this.map.clear);
+    // Consume edge triggers so they only fire once per press
+    if (firePressed) this.edgeKeys.delete(this.map.fire);
+    if (clearPressed) this.edgeKeys.delete(this.map.clear);
+
     return {
       thrust: d.has(this.map.thrust),
       turnLeft: d.has(this.map.turnLeft),
       turnRight: d.has(this.map.turnRight),
-      fire: d.has(this.map.fire),
-      clear: d.has(this.map.clear),
+      fire: firePressed,
+      clear: clearPressed,
     };
   }
 
-  destroy(): void { this.keys.clear(); }
+  destroy(): void { this.keys.clear(); this.edgeKeys.clear(); }
 }

@@ -17,16 +17,11 @@ const game: { score: Score } = {
 };
 
 export function death(id: string, by?: string): void {
-  if (by === "star" || by === "self") {
-    if (by === "self") {
-      // HACK
-      // O jogador atingido por si mesmo deve perder dois pontos
-      // mas por ter atingido alguém ele ganha um ponto.
-      // A linha a seguir desconta este ponto.
-      // O sistema de pontuação usando notificação de eventos (e definição de colisões)
-      // precisa ser recriado.
-      game.score[id as keyof Score] -= 1;
-    }
+  // Death penalties match training env:
+  //   self-hit = -3, star = -2, enemy missile = -1
+  if (by === "self") {
+    game.score[id as keyof Score] -= 3;
+  } else if (by === "star") {
     game.score[id as keyof Score] -= 2;
   } else {
     game.score[id as keyof Score] -= 1;

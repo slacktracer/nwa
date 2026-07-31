@@ -566,7 +566,12 @@ def _run_episodes_batched(
 
 # ── main training loop ────────────────────────────────────────────────────
 
-def train(config: Config) -> None:
+def train(
+    config: Config,
+    net: PPONet | None = None,
+    optimizer: optim.Optimizer | None = None,
+    start_iteration: int = 1,
+) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     print(f"Workers: {config.num_workers} parallel bridges")
@@ -576,8 +581,10 @@ def train(config: Config) -> None:
     print(f"        episodes/iter={config.episodes_per_iter} ppo_epochs={config.ppo_epochs} batch={config.batch_size}")
     print(f"        total_iters={config.total_iters} save_interval={config.save_interval}\n")
 
-    net = PPONet(config.obs_dim, config.hid_dim, config.act_dim).to(device)
-    optimizer = optim.Adam(net.parameters(), lr=config.lr, eps=1e-5)
+    if net is None:
+        net = PPONet(config.obs_dim, config.hid_dim, config.act_dim).to(device)
+    if optimizer is None:
+        optimizer = optim.Adam(net.parameters(), lr=config.lr, eps=1e-5)
 
     buffer = PPOBuffer(config.obs_dim, config.act_dim, device)
     episode_rewards: deque[float] = deque(maxlen=100)
@@ -590,7 +597,7 @@ def train(config: Config) -> None:
     total_steps = 0
 
     try:
-        for iteration in range(1, config.total_iters + 1):
+        for iteration in range(start_iteration, config.total_iters + 1):
             buffer.clear()
             iter_steps = 0
             iter_ep_rewards: list[float] = []
@@ -685,11 +692,11 @@ def main() -> None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         net = PPONet(config.obs_dim, config.hid_dim, config.act_dim).to(device)
         optimizer = optim.Adam(net.parameters(), lr=config.lr, eps=1e-5)
-        load_checkpoint(args.resume, net, optimizer)
-        # We would continue training from here — for now this is just checkpoint loading
-        print("Checkpoint loaded; use the full train() flow for resumption.")
-
-    train(config)
+        start_iter, prev_stats = load_checkpoint(args.resume, net, optimizer)
+        print(f"Resumed from iteration {start_iter}")
+        train(config, net=net, optimizer=optimizer, start_iteration=start_iter + 1)
+    else:
+        train(config)
 
 
 if __name__ == "__main__":

@@ -505,6 +505,10 @@ class NWAEnv:
         self.num_players = min(4, max(2, num_players))
         self.max_ticks = max_ticks
         self.rewards = [0.0] * self.num_players
+        self.reward_breakdown = [
+            {"survival": 0.0, "distance": 0.0, "hits": 0.0, "deaths": 0.0}
+            for _ in range(self.num_players)
+        ]
         self.tick = 0
         self.done = False
         self._ships = []
@@ -519,6 +523,10 @@ class NWAEnv:
         self.tick = 0
         self.done = False
         self.rewards = [0.0] * self.num_players
+        self.reward_breakdown = [
+            {"survival": 0.0, "distance": 0.0, "hits": 0.0, "deaths": 0.0}
+            for _ in range(self.num_players)
+        ]
 
         # Clear old state
         self._missiles.clear()
@@ -579,6 +587,10 @@ class NWAEnv:
 
         # Reset per-tick rewards
         self.rewards = [0.0] * self.num_players
+        self._tick_breakdown = [
+            {"survival": 0.0, "distance": 0.0, "hits": 0.0, "deaths": 0.0}
+            for _ in range(self.num_players)
+        ]
 
         # Apply actions → ship.commands
         for i in range(self.num_players):
@@ -601,15 +613,32 @@ class NWAEnv:
         # Collect death/detonation events
         self._collect_events()
 
-        # Dense reward: survival + distance from star
+        # Sparse combat reward + small proximity guide.
+        # Hit = +5 (dominant signal). Proximity maxes at ~1.5/episode (30% of a hit).
         for i in range(self.num_players):
             ship = self._ships[i]
-            if ship["live"]:
-                # Small survival bonus (keeps gradient flowing)
-                self.rewards[i] += 0.01
-                # Distance bonus: encourages orbiting, not sitting still
-                dist = math.sqrt(ship["position"][0]**2 + ship["position"][1]**2)
-                self.rewards[i] += dist * 0.001
+            if not ship["live"]:
+                continue
+            self.rewards[i] += 0.001
+            self._tick_breakdown[i]["survival"] += 0.001
+            self.reward_breakdown[i]["survival"] += 0.001
+
+            # Proximity: reward for being close to the nearest enemy
+            min_dist = float("inf")
+            for j in range(self.num_players):
+                if i == j or not self._ships[j]["live"]:
+                    continue
+                d = math.sqrt(
+                    (ship["position"][0] - self._ships[j]["position"][0])**2
+                    + (ship["position"][1] - self._ships[j]["position"][1])**2
+                )
+                if d < min_dist:
+                    min_dist = d
+            if min_dist < 200:
+                prox_rew = 0.01 * (1.0 - min_dist / 200.0)
+                self.rewards[i] += prox_rew
+                self._tick_breakdown[i]["distance"] += prox_rew
+                self.reward_breakdown[i]["distance"] += prox_rew
 
         self.tick += 1
 
@@ -650,9 +679,13 @@ class NWAEnv:
                         if owner_ship["weaponsSystem"]["missiles"]["live"] < 0:
                             owner_ship["weaponsSystem"]["missiles"]["live"] = 0
 
-                # Award point if missile hit a target
-                if missile["collisionData"].get("target") and owner_id:
-                    self.rewards[_ship_index(owner_id)] += 1.0
+                # Award point if missile hit an enemy (not self)
+                target_id = missile["collisionData"].get("target")
+                if target_id and owner_id and target_id != owner_id:
+                    idx = _ship_index(owner_id)
+                    self.rewards[idx] += 5.0
+                    self._tick_breakdown[idx]["hits"] += 5.0
+                    self.reward_breakdown[idx]["hits"] += 5.0
 
         # Crashes: ships that just died this tick
         for ship in self._ships:
@@ -665,12 +698,18 @@ class NWAEnv:
                     # Self-hit (own missile): -1 (undo hit point) then -2
                     self.rewards[i] -= 1.0
                     self.rewards[i] -= 2.0
+                    self._tick_breakdown[i]["deaths"] -= 3.0
+                    self.reward_breakdown[i]["deaths"] -= 3.0
                 elif ship["collisionData"].get("hit"):
                     # Hit by opponent missile
                     self.rewards[i] -= 1.0
+                    self._tick_breakdown[i]["deaths"] -= 1.0
+                    self.reward_breakdown[i]["deaths"] -= 1.0
                 else:
                     # Hit the star
                     self.rewards[i] -= 2.0
+                    self._tick_breakdown[i]["deaths"] -= 2.0
+                    self.reward_breakdown[i]["deaths"] -= 2.0
 
     def _observe(self):
         """Build observation dict."""
@@ -706,6 +745,7 @@ class NWAEnv:
         return {
             "obs": self._observe(),
             "rewards": list(self.rewards),
+            "reward_breakdown": [dict(b) for b in self.reward_breakdown],
             "done": self.done,
             "winner": winner,
             "tick": self.tick,

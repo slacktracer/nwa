@@ -7,6 +7,7 @@ import type { Ship as ShipEntity } from "./data/entities.ts";
 import ships from "./data/ships/all.ts";
 import Context from "./modules/Context.ts";
 import Grid from "./modules/Grid.ts";
+import Missile from "./modules/Missile.ts";
 import Ship from "./modules/Ship.ts";
 import Star from "./modules/Star.ts";
 import { createCanvas } from "../utilities/adapter.ts";
@@ -28,11 +29,15 @@ export interface GameConfiguration {
   height: number;
   players: number;
   aiPlayers: number;   // 0 = all human, 1-3 = AI opponents
+  clearMissiles: boolean;
   width: number;
   screen: { height: number; width: number };
 }
 
+let clearMissilesOnRestart = true;
+
 function boot(configuration: GameConfiguration): void {
+  clearMissilesOnRestart = configuration.clearMissiles !== false;
   Grid.build();
 
   for (let i = 0; i < configuration.players; i += 1) {
@@ -63,21 +68,21 @@ function boot(configuration: GameConfiguration): void {
     }
   });
 
-  // Build controller list — one per ship
-  // Human always gets ship 0. Remaining slots are AI.
+  // Build controller list — one per ship.
+  // AI fills from the end: so humans get low indices, AI gets high indices.
   const controllers: Controller[] = [];
   const total = configuration.players;
-  const aiCount = Math.min(configuration.aiPlayers, total - 1);
+  const aiCount = Math.min(configuration.aiPlayers, total);
+  const humanCount = total - aiCount;
 
-  controllers.push(new KeyboardController(0)); // ship 0 = human
-  for (let i = 1; i < total; i++) {
-    const isAI = (i - 1) < aiCount;
-    if (isAI) {
-      controllers.push(new BrowserAIController(i, "/ppo_model_final.json"));
-    } else {
+  for (let i = 0; i < total; i++) {
+    if (i < humanCount) {
       controllers.push(new KeyboardController(i));
+    } else {
+      controllers.push(new BrowserAIController(i, "/ppo_model_final.json"));
     }
   }
+  looper.setOnRoundEnd(restart);
   looper.start(controllers);
 }
 
@@ -90,6 +95,11 @@ function restart(): void {
     renderer.getContext("foreground"),
     renderer.getFrame(),
   );
+  if (clearMissilesOnRestart) {
+    entities.missiles.forEach(function (m) {
+      Missile.deactivate(m);
+    });
+  }
   entities.ships.forEach(function (ship) {
     Ship.revive(ship);
   });

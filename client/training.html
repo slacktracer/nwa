@@ -29,49 +29,65 @@
 <body>
 <div class="top">
   <h1>NWA Training</h1>
-  <span class="badge bg">GPU · 64w · 512h</span>
+  <span class="badge bg" id="mode">ES · 64p · 256h</span>
   <span class="badge bl" id="live">LIVE</span>
 </div>
 <div class="prog"><div id="prog" style="width:0%"></div></div>
 <div class="cards" id="cards"></div>
 <div class="charts">
-  <div class="ch"><h3>Avg Reward — total score per episode (higher = better)</h3><canvas id="c0"></canvas></div>
-  <div class="ch"><h3>Entropy — policy randomness (lower = more confident)</h3><canvas id="c1"></canvas></div>
-  <div class="ch"><h3>Value Loss — critic prediction error</h3><canvas id="c2"></canvas></div>
-  <div class="ch"><h3>Avg Length — ticks per episode</h3><canvas id="c3"></canvas></div>
+  <div class="ch"><h3>Mean Fitness — population average per generation</h3><canvas id="c0"></canvas></div>
+  <div class="ch"><h3>Best Fitness — best individual ever found</h3><canvas id="c1"></canvas></div>
+  <div class="ch"><h3>Avg20 — rolling 20-generation mean</h3><canvas id="c2"></canvas></div>
+  <div class="ch"><h3>—</h3><canvas id="c3"></canvas></div>
 </div>
 <div class="foot"><span id="st">Waiting…</span><span id="sp"></span></div>
 
 <script>
-const MAX=400,H={rew:[],ent:[],vl:[],len:[]};let ls=0,lt=Date.now();
+const MAX=400,H={fit:[],best:[],avg20:[]};let lastT=Date.now();
 async function poll(){
   try{const r=await fetch("/training_status.json");if(!r.ok)return;const s=await r.json();
-    const n=Date.now(),dt=(n-lt)/1000,ds=s.steps-ls,sps=dt>0?Math.round(ds/dt):0;ls=s.steps;lt=n;
-    document.getElementById("prog").style.width=(s.iter/2000*100)+"%";
-    document.getElementById("cards").innerHTML=
-      `<div class="card"><div class="l">Avg Reward</div><div class="v ${s.avg_rew>80?'g':s.avg_rew>30?'y':'r'}">${s.avg_rew.toFixed(1)}</div><div class="s">total score per episode</div></div>
-       <div class="card"><div class="l">Entropy</div><div class="v ${s.ent<8?'g':s.ent<12?'y':'r'}">${s.ent.toFixed(2)}</div><div class="s">max 13.86 · target &lt;6</div></div>
-       <div class="card"><div class="l">Value Loss</div><div class="v ${s.v_loss<.15?'g':'y'}">${s.v_loss.toFixed(3)}</div><div class="s">critic error</div></div>
-       <div class="card"><div class="l">Iteration</div><div class="v b">${s.iter}<span class="d" style="font-size:14px">/2000</span></div><div class="s">${(s.iter/2000*100).toFixed(0)}% · ${(s.steps/1e6).toFixed(1)}M steps</div></div>
-       <div class="card"><div class="l">Speed</div><div class="v d">${sps}</div><div class="s">steps/sec</div></div>
-       <div class="card"><div class="l">Avg Length</div><div class="v d">${s.avg_len.toFixed(0)}</div><div class="s">ticks per episode</div></div>`;
-    push(H.rew,s.avg_rew);push(H.ent,s.ent);push(H.vl,s.v_loss);push(H.len,s.avg_len);
-    chart("c0",[{d:H.rew,c:"#a6e3a1",lo:0,hi:200}]);
-    chart("c1",[{d:H.ent,c:"#f38ba8",lo:0,hi:14}]);
-    chart("c2",[{d:H.vl,c:"#89b4fa",lo:0,hi:5}]);
-    chart("c3",[{d:H.len,c:"#f9e2af",lo:0,hi:500}]);
+    const isES = "generation" in s;
+    document.getElementById("live").textContent = isES ? "ES · LIVE" : "PPO · LIVE";
+    document.getElementById("live").className = isES ? "badge bl" : "badge bg";
+
+    if (isES) {
+      const pct = s.generation / 500 * 100;
+      document.getElementById("prog").style.width = pct + "%";
+      document.getElementById("cards").innerHTML =
+        `<div class="card"><div class="l">Mean Fitness</div><div class="v ${s.fitness>5?'g':s.fitness>0?'y':'r'}">${s.fitness.toFixed(2)}</div><div class="s">population average</div></div>
+         <div class="card"><div class="l">Best Fitness</div><div class="v ${s.best_fitness>10?'g':s.best_fitness>5?'y':'r'}">${s.best_fitness.toFixed(2)}</div><div class="s">best individual ever</div></div>
+         <div class="card"><div class="l">Avg20</div><div class="v ${s.avg20>5?'g':s.avg20>0?'y':'r'}">${s.avg20.toFixed(2)}</div><div class="s">rolling 20-gen mean</div></div>
+         <div class="card"><div class="l">Generation</div><div class="v b">${s.generation}<span class="d" style="font-size:14px">/500</span></div><div class="s">${pct.toFixed(0)}% · ${(s.total_evals/1000).toFixed(1)}k evals</div></div>`;
+      push(H.fit, s.fitness); push(H.best, s.best_fitness); push(H.avg20, s.avg20);
+      chart("c0",[{d:H.fit,c:"#a6e3a1",lo:-15,hi:25}], "Fitness");
+      chart("c1",[{d:H.best,c:"#f9e2af",lo:-15,hi:25}], "Best");
+      chart("c2",[{d:H.avg20,c:"#89b4fa",lo:-15,hi:25}], "Avg20");
+      document.getElementById("c3").parentElement.style.display="none";
+    } else {
+      // Legacy PPO mode
+      const n=Date.now(),dt=(n-lastT)/1000,ds=(s.steps||0)-(+document.getElementById("prog").dataset.steps||0),sps=dt>0?Math.round(ds/dt):0;
+      document.getElementById("prog").dataset.steps = s.steps||0; lastT=n;
+      document.getElementById("prog").style.width=(s.iter/2000*100)+"%";
+      document.getElementById("cards").innerHTML=
+        `<div class="card"><div class="l">Avg Reward</div><div class="v ${s.avg_rew>80?'g':s.avg_rew>30?'y':'r'}">${(s.avg_rew||0).toFixed(1)}</div><div class="s">total score per episode</div></div>
+         <div class="card"><div class="l">Entropy</div><div class="v ${s.ent<8?'g':s.ent<12?'y':'r'}">${(s.ent||0).toFixed(2)}</div><div class="s">max 13.86</div></div>
+         <div class="card"><div class="l">Iteration</div><div class="v b">${s.iter}<span class="d" style="font-size:14px">/2000</span></div><div class="s">${((s.iter||0)/2000*100).toFixed(0)}% · ${((s.steps||0)/1e6).toFixed(1)}M steps</div></div>`;
+      document.getElementById("c3").parentElement.style.display="";
+    }
     document.getElementById("st").textContent=`Updated ${new Date().toLocaleTimeString()}`;
-    document.getElementById("sp").textContent=`${sps} steps/sec`;
   }catch(e){}
 }
 function push(a,v){a.push(v);if(a.length>MAX)a.shift()}
-function chart(id,series){
-  const c=document.getElementById(id),ctx=c.getContext("2d"),W=c.parentElement.clientWidth-28,H=180,PL=36,PR=6,PT=4,PB=18;
+function chart(id,series,title){
+  const c=document.getElementById(id),ctx=c.getContext("2d"),W=c.parentElement.clientWidth-28,H=180,PL=36,PR=6,PT=16,PB=18;
   c.width=W;ctx.clearRect(0,0,W,H);
+  ctx.fillStyle="#585b70";ctx.font="10px monospace";ctx.textAlign="left";
+  ctx.fillText(title,PL,12);
   ctx.strokeStyle="#1a1b26";ctx.lineWidth=1;
+  const lo=series[0].lo,hi=series[0].hi;
   for(let i=0;i<=4;i++){const y=PT+(H-PT-PB)*i/4;ctx.beginPath();ctx.moveTo(PL,y);ctx.lineTo(W-PR,y);ctx.stroke()}
   ctx.fillStyle="#45475a";ctx.font="9px monospace";ctx.textAlign="right";
-  for(let i=0;i<=4;i++){const y=PT+(H-PT-PB)*(4-i)/4;ctx.fillText((series[0].lo+(series[0].hi-series[0].lo)*i/4).toFixed(0),PL-5,y+3)}
+  for(let i=0;i<=4;i++){const y=PT+(H-PT-PB)*(4-i)/4;ctx.fillText((lo+(hi-lo)*i/4).toFixed(0),PL-5,y+3)}
   for(const s of series){if(s.d.length<2)continue;
     const xs=(W-PL-PR)/Math.max(s.d.length-1,1),ys=(H-PT-PB)/(s.hi-s.lo||1);
     const grad=ctx.createLinearGradient(0,PT,0,H-PB);grad.addColorStop(0,s.c+"44");grad.addColorStop(1,s.c+"04");

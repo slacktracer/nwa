@@ -1,7 +1,7 @@
 // Dev server with on-the-fly TypeScript transpilation via esbuild
 // Run: deno task serve
 
-import * as esbuild from "npm:esbuild";
+import * as esbuild from "npm:esbuild@0.20.2";
 
 const PORT = 8080;
 const ROOT = "./client";

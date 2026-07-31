@@ -15,6 +15,7 @@ events.on(
 function configuration(): GameConfiguration {
   const playersSelect = element("#players") as HTMLSelectElement;
   const aiSelect = element("#aiplayers") as HTMLSelectElement;
+  const clearCheck = element("#clearmissiles") as HTMLInputElement;
   return {
     aspect: "fullscreen",
     contexts: {
@@ -26,6 +27,7 @@ function configuration(): GameConfiguration {
     height: 500,
     players: parseInt(playersSelect.value, 10) || 2,
     aiPlayers: parseInt(aiSelect.value, 10) || 0,
+    clearMissiles: clearCheck.checked,
     width: 500,
     screen: screenSize(),
   };

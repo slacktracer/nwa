@@ -7,11 +7,14 @@ import type { Controller } from "../controller.ts";
 import entities from "./data/entities.ts";
 
 const millisecondsPerUpdate = 16;
+const AUTO_RESTART_DELAY = 2000; // ms before auto-restart when round ends
 
 let doLoop = false;
 let lag = 0;
 let previousTime = 0;
 let controllers: Controller[] = [];
+let onRoundEnd: (() => void) | null = null;
+let roundEndTimer: ReturnType<typeof setTimeout> | null = null;
 
 function loop(): void {
   meter.tickStart();
@@ -37,6 +40,19 @@ function loop(): void {
 
     update(millisecondsPerUpdate, time);
     lag -= millisecondsPerUpdate;
+
+    // Auto-restart: when only 0-1 ships alive, start countdown
+    const alive = entities.ships.filter((s) => s.live).length;
+    if (alive <= 1 && onRoundEnd && !roundEndTimer) {
+      roundEndTimer = setTimeout(() => {
+        roundEndTimer = null;
+        onRoundEnd?.();
+      }, AUTO_RESTART_DELAY);
+    }
+    if (alive > 1 && roundEndTimer) {
+      clearTimeout(roundEndTimer);
+      roundEndTimer = null;
+    }
   }
 
   renderer.render(lag / millisecondsPerUpdate);
@@ -70,4 +86,8 @@ function toggle(): void {
   if (doLoop) start(controllers);
 }
 
-export default Object.freeze({ start, stop, toggle });
+function setOnRoundEnd(fn: () => void): void {
+  onRoundEnd = fn;
+}
+
+export default Object.freeze({ start, stop, toggle, setOnRoundEnd });

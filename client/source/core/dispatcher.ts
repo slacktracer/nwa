@@ -7,7 +7,8 @@ on("detonation", function (data: Record<string, unknown>) {
   const target = data.target as string | undefined;
   const ship = entities.ships.byId[owner];
   ship.weaponsSystem.missiles.live -= 1;
-  if (target) {
+  // Only award point if missile hit an enemy (not self)
+  if (target && target !== owner) {
     game.point(owner);
   }
   if (ship.weaponsSystem.missiles.live < 0) {
