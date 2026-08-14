@@ -145,6 +145,12 @@ def battery_recharge(battery, charge):
 # ── Collision detection (matches Physics.ts detectCollisions) ────────
 
 def detect_collisions(missiles, ships, star):
+    # Reset collision data each tick
+    for s in ships:
+        s["collisionData"] = {"isColliding": False, "hit": False, "self": False, "target": False, "star": False}
+    for m in missiles:
+        m["collisionData"] = {"isColliding": False, "target": None}
+
     # Ship-ship and ship-star collisions
     for i in range(len(ships)):
         if ships[i]["live"]:
@@ -159,6 +165,7 @@ def detect_collisions(missiles, ships, star):
                             ships[j]["collisionData"]["isColliding"] = True
             else:
                 ships[i]["collisionData"]["isColliding"] = True
+                ships[i]["collisionData"]["star"] = True
 
     # Missile-ship and missile-star collisions
     for i in range(len(missiles)):
@@ -185,7 +192,7 @@ def ship_template():
     return {
         "acceleration": [0.0, 0.0],
         "battery": {"level": 100.0, "maximum": 100.0},
-        "collisionData": {"isColliding": False, "hit": False, "self": False, "target": False},
+        "collisionData": {"isColliding": False, "hit": False, "self": False, "target": False, "star": False},
         "colours": {
             "crash": "hsla(360, 100%, 100%, 0.05)",
             "hull": "hsla(360, 100%, 100%, 0.7)",
@@ -443,7 +450,23 @@ def _ship_process_commands(ship):
 def _ship_update(ship, star, missiles):
     """Ship.update: matches Ship.ts update()"""
     if ship["collisionData"]["isColliding"]:
-        ship["live"] = False
+        # Star collision: bounce off instead of dying
+        if ship["collisionData"].get("star"):
+            # Push ship away from star center + reflect velocity
+            dx = ship["position"][0] - star["position"][0]
+            dy = ship["position"][1] - star["position"][1]
+            dist = math.sqrt(dx * dx + dy * dy) or 1.0
+            # Nudge position outside star radius
+            push_dist = ship["radius"] + star["radius"] + 1.0
+            ship["position"][0] = star["position"][0] + (dx / dist) * push_dist
+            ship["position"][1] = star["position"][1] + (dy / dist) * push_dist
+            # Reflect velocity (reverse radial component)
+            vx, vy = ship["velocity"][0], ship["velocity"][1]
+            dot = (vx * dx + vy * dy) / (dist * dist)
+            ship["velocity"][0] = vx - 2 * dot * dx
+            ship["velocity"][1] = vy - 2 * dot * dy
+        else:
+            ship["live"] = False
 
     if ship["live"]:
         bind_body(ship, FRAME)
@@ -613,32 +636,8 @@ class NWAEnv:
         # Collect death/detonation events
         self._collect_events()
 
-        # Sparse combat reward + small proximity guide.
-        # Hit = +5 (dominant signal). Proximity maxes at ~1.5/episode (30% of a hit).
-        for i in range(self.num_players):
-            ship = self._ships[i]
-            if not ship["live"]:
-                continue
-            self.rewards[i] += 0.001
-            self._tick_breakdown[i]["survival"] += 0.001
-            self.reward_breakdown[i]["survival"] += 0.001
-
-            # Proximity: reward for being close to the nearest enemy
-            min_dist = float("inf")
-            for j in range(self.num_players):
-                if i == j or not self._ships[j]["live"]:
-                    continue
-                d = math.sqrt(
-                    (ship["position"][0] - self._ships[j]["position"][0])**2
-                    + (ship["position"][1] - self._ships[j]["position"][1])**2
-                )
-                if d < min_dist:
-                    min_dist = d
-            if min_dist < 200:
-                prox_rew = 0.01 * (1.0 - min_dist / 200.0)
-                self.rewards[i] += prox_rew
-                self._tick_breakdown[i]["distance"] += prox_rew
-                self.reward_breakdown[i]["distance"] += prox_rew
+        # Pure combat reward. No shaped bonuses — star is non-lethal (bounces),
+        # episodes last long enough for hits to happen naturally.
 
         self.tick += 1
 
@@ -683,9 +682,9 @@ class NWAEnv:
                 target_id = missile["collisionData"].get("target")
                 if target_id and owner_id and target_id != owner_id:
                     idx = _ship_index(owner_id)
-                    self.rewards[idx] += 5.0
-                    self._tick_breakdown[idx]["hits"] += 5.0
-                    self.reward_breakdown[idx]["hits"] += 5.0
+                    self.rewards[idx] += 10.0
+                    self._tick_breakdown[idx]["hits"] += 10.0
+                    self.reward_breakdown[idx]["hits"] += 10.0
 
         # Crashes: ships that just died this tick
         for ship in self._ships:

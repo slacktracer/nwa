@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# monitor.sh — watch 2-player PPO training progress
+# monitor.sh — watch 4-player PPO training progress
 # Usage: watch -n 5 ./monitor.sh   (refresh every 5s)
 #    or: while true; do ./monitor.sh; sleep 5; done
 
@@ -7,7 +7,7 @@ set -euo pipefail
 
 STATUS="client/training_status.json"
 TOTAL_ITERS=2000
-CHECKPOINT_DIR="checkpoints/p2_ppo"
+CHECKPOINT_DIR="checkpoints/p2_v4"
 
 # ── training status ──────────────────────────────────────────
 if [[ -f "$STATUS" ]]; then
@@ -19,17 +19,18 @@ if [[ -f "$STATUS" ]]; then
   p_loss=$(jq -r '.p_loss // 0' "$STATUS")
   v_loss=$(jq -r '.v_loss // 0' "$STATUS")
 
-  pct=$(echo "scale=1; $iter / $TOTAL_ITERS * 100" | bc)
+  pct=$(echo "scale=1; $iter * 100 / $TOTAL_ITERS" | bc)
 
   # ── bar ────────────────────────────────────────────────────
   bar_width=30
   filled=$(echo "$pct * $bar_width / 100" | bc | cut -d. -f1)
-  bar=$(printf "█%.0s" $(seq 1 "$filled"))
-  empty=$(printf "░%.0s" $(seq 1 $((bar_width - filled))))
+  filled=$(( filled > 0 ? filled : 0 ))
+  bar=$(printf "█%.0s" $(seq 1 "$filled") 2>/dev/null || true)
+  empty=$(printf "░%.0s" $(seq 1 $((bar_width - filled))) 2>/dev/null || true)
 
   printf "\033[2J\033[H"  # clear screen
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo "  PPO Training — 2 players, hid=256, GPU (CUDA)"
+  echo "  PPO Training — 4 players, hid=256, GPU (CUDA)"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
   echo ""
   printf "  Progress:  %s%s  %s%%  (iter %d / %d)\n" \
